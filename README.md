@@ -1,6 +1,6 @@
 # LLM Proxy
 
-# LLM Proxy
+![Banner](banner.jpg)
 
 A FastAPI-based proxy server that provides OpenAI-compatible and TEI (Text Embeddings Inference) compatible endpoints for llama-server instances.
 
