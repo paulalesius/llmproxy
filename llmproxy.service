@@ -8,9 +8,11 @@ User=noname
 Group=noname
 WorkingDirectory=/src/llmproxy
 Environment="LLMPROXY_OAILLM_BASE_URL=http://127.0.0.1:8080"
-Environment="LLMPROXY_OAILLM_API_KEY=***"
+Environment="LLMPROXY_OAILLM_API_KEY="
+Environment="LLMPROXY_OAIEMBEDDINGS_BASE_URL=http://127.0.0.1:8081"
+Environment="LLMPROXY_OAIEMBEDDINGS_API_KEY="
 Environment="LLMPROXY_TEIRERANKER_BASE_URL=http://127.0.0.1:8082"
-Environment="LLMPROXY_TEIRERANKER_API_KEY=***"
+Environment="LLMPROXY_TEIRERANKER_API_KEY="
 Environment="LLMPROXY_HOST=0.0.0.0"
 Environment="LLMPROXY_PORT=4001"
 Environment="LLMPROXY_LOG_LEVEL=debug"

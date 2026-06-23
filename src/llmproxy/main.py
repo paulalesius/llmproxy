@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from uvicorn import Config, Server
 from .components.tei import TEIComponent
 from .components.openai import OpenAIComponent
+from .components.embeddings import EmbeddingsComponent
 
 # Configure logging level from environment
 log_level = os.environ.get("LLMPROXY_LOG_LEVEL", "info").lower()
@@ -31,10 +32,12 @@ async def lifespan(app: FastAPI):
     # Startup
     app.state.tei = TEIComponent()
     app.state.openai = OpenAIComponent()
+    app.state.embeddings = EmbeddingsComponent()
     yield
     # Shutdown
     await app.state.tei.close()
     await app.state.openai.close()
+    await app.state.embeddings.close()
 
 
 app = FastAPI(
@@ -162,8 +165,8 @@ async def openai_completions(request: dict):
 
 @app.post("/v1/embeddings")
 async def openai_embeddings(request: dict):
-    """OpenAI-compatible: embeddings."""
-    data, status = await app.state.openai.embeddings(request, return_response=True)
+    """OpenAI-compatible: embeddings (uses dedicated embeddings server)."""
+    data, status = await app.state.embeddings.embeddings(request, return_response=True)
     return JSONResponse(content=data, status_code=int(status))
 
 

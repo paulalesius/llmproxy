@@ -40,6 +40,8 @@ Set these environment variables:
 |----------|---------|-------------|
 | `LLMPROXY_OAILLM_BASE_URL` | `http://127.0.0.1:8080` | LLM llama-server URL |
 | `LLMPROXY_OAILLM_API_KEY` | `` | API key for LLM backend (optional) |
+| `LLMPROXY_OAIEMBEDDINGS_BASE_URL` | `http://127.0.0.1:8081` | Dedicated embeddings server URL |
+| `LLMPROXY_OAIEMBEDDINGS_API_KEY` | `` | API key for embeddings backend (optional) |
 | `LLMPROXY_TEIRERANKER_BASE_URL` | `http://127.0.0.1:8082` | Reranker llama-server URL |
 | `LLMPROXY_TEIRERANKER_API_KEY` | `` | API key for reranker backend (optional) |
 | `LLMPROXY_HOST` | `0.0.0.0` | Proxy listen address |
@@ -197,10 +199,11 @@ Tests are designed for router-mode llama-server, so they accept 500 (model loadi
 ## Architecture
 
 - `src/llmproxy/main.py`: FastAPI app with route definitions
-- `src/llmproxy/components/openai.py`: OpenAI endpoint proxy with streaming support
+- `src/llmproxy/components/openai.py`: OpenAI endpoint proxy with streaming support (chat/completions)
+- `src/llmproxy/components/embeddings.py`: Dedicated embeddings proxy (separate from LLM server)
 - `src/llmproxy/components/tei.py`: TEI rerank proxy with Hindsight compatibility
 
-All components use `httpx.AsyncClient` with configurable timeouts and proper error handling.
+All components use `httpx.AsyncClient` with configurable timeouts, proper error handling, and logging based on `LLMPROXY_LOG_LEVEL`.
 
 ## Known behaviors
 
