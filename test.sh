@@ -25,6 +25,7 @@ echo "=== LLM Proxy Integration Tests ==="
 echo "Proxy: $PROXY_URL (port $TEST_PORT)"
 echo "LLaMA backend: $LLAMA_URL"
 echo "TEI backend: $TEI_URL"
+echo "Embeddings backend: ${LLMPROXY_OAIEMBEDDINGS_BASE_URL:-http://127.0.0.1:8081}"
 echo ""
 
 # Start llmproxy on test port
@@ -33,6 +34,7 @@ cd "$(dirname "$0")"
 export LLMPROXY_PORT=$TEST_PORT
 export LLMPROXY_TEIRERANKER_BASE_URL=$TEI_URL
 export LLMPROXY_OAILLM_BASE_URL=$LLAMA_URL
+export LLMPROXY_OAIEMBEDDINGS_BASE_URL=${LLMPROXY_OAIEMBEDDINGS_BASE_URL:-http://127.0.0.1:8081}
 .venv/bin/python -m src.llmproxy.main &
 TEST_PID=$!
 

@@ -1,14 +1,14 @@
 # LLM Proxy
 
-A FastAPI-based proxy server that provides OpenAI-compatible and TEI (Text Embeddings Inference) compatible endpoints for llama-server instances.
+# LLM Proxy
 
-> **Note**: This project is **vibe-coded** for personal use. The code works, but don't expect clean architecture or comprehensive comments. It solves the problem, which is the point.
+A FastAPI-based proxy server that provides OpenAI-compatible and TEI (Text Embeddings Inference) compatible endpoints for llama-server instances.
 
 ## Purpose
 
 This proxy solves two main problems:
 
-1. **Unified access point**: Route requests to different llama-server instances (LLM on port 8080, reranker on port 8082) through a single endpoint
+1. **Unified access point**: Route requests to different llama-server instances (LLM on port 8080, reranker on port 8082, embeddings on port 8081) through a single endpoint
 2. **API compatibility**: Provide proper OpenAI and TEI API shapes that clients expect, with Hindsight compatibility shims
 
 ## Features
@@ -17,6 +17,7 @@ This proxy solves two main problems:
   - Full streaming support (SSE) for chat and completions
   - Proper HTTP status code forwarding (400, 429, 500, etc.)
   - Auto-fetch default model for completions when model name is missing
+  - **Dedicated embeddings server** (separate from LLM, configurable via `LLMPROXY_OAIEMBEDDINGS_BASE_URL`)
 
 - **TEI-compatible rerank endpoint**: `/v1/rerank`, `/rerank`
   - Full TEI spec compliance with proper index preservation
@@ -25,6 +26,20 @@ This proxy solves two main problems:
 
 - **Router-mode aware**: Handles llama-server's slow model loading (20-35 seconds) with appropriate timeouts
 
+- **Configurable logging**: `LLMPROXY_LOG_LEVEL` (info/debug/trace) for request/response inspection
+
+## Vibe-Coded
+
+This project was built for personal use with a "vibe-coded" approach — it works for the intended use cases (local RAG, Hindsight, OpenAI-compatible clients) but may not be production-grade for all edge cases. The code is functional and tested, but not exhaustively reviewed or optimized for every possible scenario.
+
+**Use it as-is, don't over-analyze the code.** If it works for your needs, great. If you need to extend it, the architecture is clean enough to add features.
+
+
+---
+
+**Note:** This project is *vibe-coded* for personal use. The code works, but don't expect it to be pretty or fully documented. I just needed llmproxy to do its job.
+
+---
 ## Installation
 
 ```bash

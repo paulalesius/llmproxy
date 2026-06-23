@@ -1,21 +1,31 @@
 [Unit]
-Description=LLM Proxy - TEI-compatible rerank proxy
-After=network.target llama-reranker.service
+Description=LLM Proxy - TEI-compatible rerank and OpenAI-compatible LLM/embeddings proxy
+After=network.target
 
 [Service]
 Type=simple
 User=noname
 Group=noname
 WorkingDirectory=/src/llmproxy
+
+# LLM server (chat/completions/models)
 Environment="LLMPROXY_OAILLM_BASE_URL=http://127.0.0.1:8080"
 Environment="LLMPROXY_OAILLM_API_KEY="
-Environment="LLMPROXY_OAIEMBEDDINGS_BASE_URL=http://127.0.0.1:8081"
-Environment="LLMPROXY_OAIEMBEDDINGS_API_KEY="
+
+# Reranker server (TEI rerank)
 Environment="LLMPROXY_TEIRERANKER_BASE_URL=http://127.0.0.1:8082"
 Environment="LLMPROXY_TEIRERANKER_API_KEY="
+
+# Embeddings server (dedicated embeddings instance)
+Environment="LLMPROXY_OAIEMBEDDINGS_BASE_URL=http://127.0.0.1:8081"
+Environment="LLMPROXY_OAIEMBEDDINGS_API_KEY="
+
+# Proxy configuration
 Environment="LLMPROXY_HOST=0.0.0.0"
 Environment="LLMPROXY_PORT=4001"
 Environment="LLMPROXY_LOG_LEVEL=debug"
+
+# Setup and start
 ExecStartPre=/home/noname/.local/bin/uv sync
 ExecStart=/src/llmproxy/.venv/bin/python -m src.llmproxy.main
 Restart=on-failure

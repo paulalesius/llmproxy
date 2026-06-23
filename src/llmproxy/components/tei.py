@@ -109,46 +109,29 @@ class TEIComponent:
     async def rerank(self, request: RerankRequest) -> List[RerankResult]:
         """
         Proxy rerank request to llama-server.
-        
-        TEI format:
-        {
-          "model": "model-name",
-          "query": "search query",
-          "documents": ["doc1", "doc2"],
-          "top_n": 5
-        }
-        
-        Hindsight API format (simplified):
-        {
-          "query": "search query",
-          "return_text": true/false
-        }
         """
         import time
         start = time.time()
         
         log_level = os.environ.get("LLMPROXY_LOG_LEVEL", "info").lower()
         
-        # Handle Hindsight API compatibility
-        if request.return_text is not None:
-            request.return_documents = request.return_text
-        
-        # Hindsight uses 'texts' instead of 'documents'
+        # Build payload (don't mutate the request object)
+        documents = request.documents
         if request.texts is not None:
-            request.documents = request.texts
+            # Hindsight uses 'texts' instead of 'documents'
+            documents = request.texts
         
         # Default documents if not provided
-        if request.documents is None or len(request.documents) == 0:
-            request.documents = ["no documents provided"]
+        if documents is None or len(documents) == 0:
+            documents = ["no documents provided"]
         
         # Default model if not provided
-        if request.model is None:
-            request.model = "reranker"
+        model = request.model or "reranker"
         
         payload = {
-            "model": request.model,
+            "model": model,
             "query": request.query,
-            "documents": request.documents,
+            "documents": documents,
         }
         
         # Add optional parameters if provided
@@ -156,7 +139,11 @@ class TEIComponent:
             payload["top_n"] = request.top_n
         if request.max_chunks_per_doc is not None:
             payload["max_chunks_per_doc"] = request.max_chunks_per_doc
-        if request.return_documents is not None:
+        
+        # Hindsight API compatibility: return_text instead of return_documents
+        if request.return_text is not None:
+            payload["return_documents"] = request.return_text
+        elif request.return_documents is not None:
             payload["return_documents"] = request.return_documents
         
         # Build headers
