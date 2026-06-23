@@ -61,6 +61,7 @@ Set these environment variables:
 | `LLMPROXY_TEIRERANKER_API_KEY` | `` | API key for reranker backend (optional) |
 | `LLMPROXY_HOST` | `0.0.0.0` | Proxy listen address |
 | `LLMPROXY_PORT` | `4001` | Proxy listen port |
+| `LLMPROXY_API_KEY` | `` | API key for proxy authentication (enabled when LLMPROXY_PORT is set) |
 | `LLMPROXY_LOG_LEVEL` | `info` | Log level: `info`, `debug`, or `trace` |
 
 **Log levels:**
@@ -81,6 +82,20 @@ uv run python -m src.llmproxy.main
 export LLMPROXY_LOG_LEVEL=trace
 uv run python -m src.llmproxy.main
 ```
+
+### Example: Enable API key authentication
+```bash
+export LLMPROXY_PORT=4001
+export LLMPROXY_API_KEY=min-hemliga-nyckel
+uv run python -m src.llmproxy.main
+```
+
+When `LLMPROXY_PORT` and `LLMPROXY_API_KEY` are both set, the proxy requires API key authentication on all requests. Send the API key in the `Authorization` header:
+
+- **Bearer token format**: `Authorization: Bearer min-hemliga-nyckel`
+- **Raw format**: `Authorization: min-hemliga-nyckel`
+
+Without a valid API key, requests return `401 Unauthorized`.
 
 Debug log example:
 ```
@@ -210,6 +225,21 @@ This tests:
 - Embeddings
 
 Tests are designed for router-mode llama-server, so they accept 500 (model loading) and 404 (model not loaded) as valid proxy behavior.
+
+### API Key Authentication Tests
+
+Run API key authentication tests:
+
+```bash
+cd /src/llmproxy
+bash test_api_key.sh
+```
+
+This tests:
+- Request without API key (expect 401)
+- Request with wrong API key (expect 401)
+- Request with correct API key as Bearer token (expect 200)
+- Request with correct API key as raw value (expect 200)
 
 ## Architecture
 

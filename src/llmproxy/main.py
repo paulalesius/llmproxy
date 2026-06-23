@@ -3,12 +3,19 @@
 import os
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from uvicorn import Config, Server
 from .components.tei import TEIComponent
 from .components.openai import OpenAIComponent
 from .components.embeddings import EmbeddingsComponent
+
+# API key configuration
+# API key protection is enabled when LLMPROXY_PORT is set
+LLMPROXY_PORT = os.environ.get("LLMPROXY_PORT")
+LLMPROXY_API_KEY = os.environ.get("LLMPROXY_API_KEY", "")
+API_KEY_ENABLED = bool(LLMPROXY_PORT and LLMPROXY_API_KEY)
 
 # Configure logging level from environment
 log_level = os.environ.get("LLMPROXY_LOG_LEVEL", "info").lower()
@@ -24,6 +31,26 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+class APIKeyMiddleware(BaseHTTPMiddleware):
+    """Middleware to check API key when enabled."""
+    
+    async def dispatch(self, request: Request, call_next):
+        if API_KEY_ENABLED:
+            auth_header = request.headers.get("Authorization", "")
+            expected_prefix = f"Bearer {LLMPROXY_API_KEY}"
+            
+            # Check for Bearer token or raw API key
+            if auth_header != expected_prefix and auth_header != LLMPROXY_API_KEY:
+                logger.warning(f"API key mismatch: got '{auth_header[:20]}...'")
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": {"message": "Invalid API key", "type": "invalid_api_key"}}
+                )
+        
+        response = await call_next(request)
+        return response
 
 
 @asynccontextmanager
@@ -46,6 +73,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan
 )
+
+# Add API key middleware
+app.add_middleware(APIKeyMiddleware)
 
 
 # No need for on_event decorators anymore
