@@ -2,6 +2,8 @@
 
 A FastAPI-based proxy server that provides OpenAI-compatible and TEI (Text Embeddings Inference) compatible endpoints for llama-server instances.
 
+> **Note**: This project is **vibe-coded** for personal use. The code works, but don't expect clean architecture or comprehensive comments. It solves the problem, which is the point.
+
 ## Purpose
 
 This proxy solves two main problems:
@@ -42,23 +44,22 @@ Set these environment variables:
 | `LLMPROXY_TEIRERANKER_API_KEY` | `` | API key for reranker backend (optional) |
 | `LLMPROXY_HOST` | `0.0.0.0` | Proxy listen address |
 | `LLMPROXY_PORT` | `4001` | Proxy listen port |
-| `LLMPROXY_LOG_LEVEL` | `info` | Logging level: `info`, `debug`, `warning`, `error`, `trace` |
+| `LLMPROXY_LOG_LEVEL` | `info` | Log level: `info`, `debug`, or `trace` |
 
-### Logging Levels
+**Log levels:**
+- **info**: Basic logs (endpoints, status codes, timing)
+- **debug**: Full requests/responses with headers and truncated body content
+- **trace**: Everything including full text content (prompts, documents, etc.)
 
-- **`info`** (default): Basic logging - endpoints, status codes, response times
-- **`debug`**: Full request/response logging with truncated text content (prompts, documents, etc. shown as `[N chars]`)
-- **`trace`**: Complete logging including full text content (useful for debugging inference content)
-- **`warning`**: Only warnings and errors
-- **`error`**: Only errors
+The systemd service defaults to `debug` level.
 
-Example: Enable debug logging
+### Example: Enable debug logging
 ```bash
 export LLMPROXY_LOG_LEVEL=debug
 uv run python -m src.llmproxy.main
 ```
 
-Example: Enable trace logging (full text content)
+### Example: Enable trace logging (full text content)
 ```bash
 export LLMPROXY_LOG_LEVEL=trace
 uv run python -m src.llmproxy.main

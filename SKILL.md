@@ -42,6 +42,14 @@ uv run python -m src.llmproxy.main
 | `LLMPROXY_TEIRERANKER_API_KEY` | `` | No | API key for reranker backend |
 | `LLMPROXY_HOST` | `0.0.0.0` | No | Listen address |
 | `LLMPROXY_PORT` | `4001` | No | Listen port |
+| `LLMPROXY_LOG_LEVEL` | `info` | No | Log level: `info`, `debug`, `trace` |
+
+**Log levels:**
+- **info**: Basic logs (endpoints, status, timing)
+- **debug**: Full requests/responses with truncated content
+- **trace**: Everything including full text (prompts, documents)
+
+The systemd service defaults to `debug`.
 
 ## systemd Service
 

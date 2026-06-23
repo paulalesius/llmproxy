@@ -13,7 +13,7 @@ Environment="LLMPROXY_TEIRERANKER_BASE_URL=http://127.0.0.1:8082"
 Environment="LLMPROXY_TEIRERANKER_API_KEY=***"
 Environment="LLMPROXY_HOST=0.0.0.0"
 Environment="LLMPROXY_PORT=4001"
-Environment="LLMPROXY_LOG_LEVEL=info"
+Environment="LLMPROXY_LOG_LEVEL=debug"
 ExecStartPre=/home/noname/.local/bin/uv sync
 ExecStart=/src/llmproxy/.venv/bin/python -m src.llmproxy.main
 Restart=on-failure
