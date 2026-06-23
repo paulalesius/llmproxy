@@ -154,24 +154,34 @@ class OpenAIComponent:
                 _log_request(log_level, "/v1/chat/completions", "POST", body)
         
         if is_stream:
+            logger.info(f"chat_completions streaming request for model={body.get('model')}")
+            if log_level == "trace":
+                _log_request("trace", "/v1/chat/completions", "POST", body)
+
             try:
                 resp = await self.client.post(
                     "/v1/chat/completions",
                     json=body,
                     headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
-                    timeout=httpx.Timeout(30.0, read=120.0)
+                    timeout=httpx.Timeout(30.0, read=300.0)
                 )
                 resp.raise_for_status()
-                
-                if log_level == "trace":
-                    logger.trace(f"Streaming response started, status={resp.status_code}")
-                
+
+                async def stream_generator():
+                    async for chunk in resp.aiter_bytes():
+                        yield chunk
+
                 return StreamingResponse(
-                    resp.aiter_lines(),
+                    stream_generator(),
                     media_type="text/event-stream",
-                    status_code=resp.status_code
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                    status_code=resp.status_code,
                 ), resp.status_code
-                
+
             except httpx.HTTPStatusError as e:
                 logger.info(f"chat_completions streaming HTTP error: {e.response.status_code}")
                 return e.response.json(), e.response.status_code

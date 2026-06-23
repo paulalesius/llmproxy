@@ -21,9 +21,10 @@ Environment="LLMPROXY_OAIEMBEDDINGS_BASE_URL=http://127.0.0.1:8081"
 Environment="LLMPROXY_OAIEMBEDDINGS_API_KEY="
 
 # Proxy configuration
-Environment="LLMPROXY_HOST=0.0.0.0"
-Environment="LLMPROXY_PORT=4001"
-Environment="LLMPROXY_LOG_LEVEL=debug"
+Environment=LLMPROXY_HOST=0.0.0.0
+Environment=LLMPROXY_PORT=4001
+Environment=LLMPROXY_LOG_LEVEL=debug
+Environment=LLMPROXY_API_KEY=
 
 # Setup and start
 ExecStartPre=/home/noname/.local/bin/uv sync

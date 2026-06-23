@@ -14,8 +14,8 @@ from .components.embeddings import EmbeddingsComponent
 # API key configuration
 # API key protection is enabled when LLMPROXY_PORT is set
 LLMPROXY_PORT = os.environ.get("LLMPROXY_PORT")
-LLMPROXY_API_KEY = os.environ.get("LLMPROXY_API_KEY", "")
-API_KEY_ENABLED = bool(LLMPROXY_PORT and LLMPROXY_API_KEY)
+LLMPROXY_API_KEY = os.environ.get("LLMPROXY_API_KEY", "").strip()
+API_KEY_ENABLED = bool(LLMPROXY_API_KEY)
 
 # Configure logging level from environment
 log_level = os.environ.get("LLMPROXY_LOG_LEVEL", "info").lower()
@@ -34,23 +34,40 @@ logger = logging.getLogger(__name__)
 
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
-    """Middleware to check API key when enabled."""
-    
+    """Middleware to check API key when enabled.
+
+    Only protects OpenAI LLM endpoints.
+    TEI endpoints (/v1/rerank, /v1/info) and health are excluded.
+    """
+
+    # Endpoints that require API key
+    PROTECTED_PATHS = {"/v1/models", "/v1/chat/completions", "/v1/completions", "/v1/embeddings"}
+
     async def dispatch(self, request: Request, call_next):
-        if API_KEY_ENABLED:
-            auth_header = request.headers.get("Authorization", "")
-            expected_prefix = f"Bearer {LLMPROXY_API_KEY}"
-            
-            # Check for Bearer token or raw API key
-            if auth_header != expected_prefix and auth_header != LLMPROXY_API_KEY:
-                logger.warning(f"API key mismatch: got '{auth_header[:20]}...'")
-                return JSONResponse(
-                    status_code=401,
-                    content={"error": {"message": "Invalid API key", "type": "invalid_api_key"}}
-                )
-        
-        response = await call_next(request)
-        return response
+        if not API_KEY_ENABLED:
+            return await call_next(request)
+
+        path = request.url.path
+
+        # Skip API key check for TEI endpoints, health, and root
+        if path in {"/health", "/v1/info", "/info", "/v1/rerank", "/rerank", "/"}:
+            return await call_next(request)
+
+        # Only check API key on protected OpenAI paths
+        if not any(path.startswith(p) for p in self.PROTECTED_PATHS):
+            return await call_next(request)
+
+        auth_header = request.headers.get("Authorization", "")
+        expected_prefix = f"Bearer {LLMPROXY_API_KEY}"
+
+        if auth_header != expected_prefix and auth_header != LLMPROXY_API_KEY:
+            logger.warning(f"API key mismatch on {path}")
+            return JSONResponse(
+                status_code=401,
+                content={"error": {"message": "Invalid API key", "type": "invalid_api_key"}}
+            )
+
+        return await call_next(request)
 
 
 @asynccontextmanager
@@ -198,7 +215,6 @@ async def openai_embeddings(request: dict):
     """OpenAI-compatible: embeddings (uses dedicated embeddings server)."""
     data, status = await app.state.embeddings.embeddings(request, return_response=True)
     return JSONResponse(content=data, status_code=int(status))
-
 
 def main():
     """Run the proxy server."""
