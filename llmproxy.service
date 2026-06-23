@@ -1,0 +1,22 @@
+[Unit]
+Description=LLM Proxy - TEI-compatible rerank proxy
+After=network.target llama-reranker.service
+
+[Service]
+Type=simple
+User=noname
+Group=noname
+WorkingDirectory=/src/llmproxy
+Environment="LLMPROXY_OAILLM_BASE_URL=http://127.0.0.1:8080"
+Environment="LLMPROXY_OAILLM_API_KEY=***"
+Environment="LLMPROXY_TEIRERANKER_BASE_URL=http://127.0.0.1:8082"
+Environment="LLMPROXY_TEIRERANKER_API_KEY=***"
+Environment="LLMPROXY_HOST=0.0.0.0"
+Environment="LLMPROXY_PORT=4001"
+ExecStartPre=/home/noname/.local/bin/uv sync
+ExecStart=/src/llmproxy/.venv/bin/python -m src.llmproxy.main
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
