@@ -55,7 +55,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Global lock configuration
-# Disabled by default unless explicitly enabled via global_lock.enabled in config file
+# Disabled by default unless explicitly enabled via backends.global_lock in config file
 # Use -c/--config flag to specify config path
 args = parse_args()
 LOCK_CONFIG_PATH = args.config
@@ -110,14 +110,14 @@ def load_lock_config():
         with open(LOCK_CONFIG_PATH, "r") as f:
             config = yaml.safe_load(f) or {}
         
-        lock_config = config.get("global_lock")
+        lock_config = config.get("backends", {})
         
         if lock_config is None:
             logger.info("Global lock: no config found, disabled by default")
-            lock_config = {"enabled": False}
+            lock_config = {}
             return
         
-        if not lock_config.get("enabled", False):
+        if not lock_config.get("global_lock", False):
             logger.info("Global lock: config found but not enabled")
             return
         

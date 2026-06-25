@@ -13,8 +13,8 @@
 #
 # You can use either backend names (recommended) or paths (auto-mapped)
 
-global_lock:
-  enabled: true
+backends:
+  global_lock: true
   
   # If true, return 503 Service Unavailable when lock is busy
   # If false (default), block/wait until lock is available

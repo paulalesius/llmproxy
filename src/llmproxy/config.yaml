@@ -3,8 +3,8 @@
 # Global lock configuration (backend-based)
 # Each backend lists which OTHER backends it should lock
 # This ensures that when one backend runs, others cannot run simultaneously
-global_lock:
-  enabled: true
+backends:
+  global_lock: true
   llm:
     locks:
       - embed
