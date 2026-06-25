@@ -16,7 +16,7 @@ This proxy solves two main problems:
 - **OpenAI-compatible endpoints**: `/v1/models`, `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`
   - Full streaming support (SSE) for chat and completions
   - Proper HTTP status code forwarding (400, 429, 500, etc.)
-  - Auto-fetch default model for completions when model name is missing
+  - Uses `model="default"` for completions when model name is missing
   - **Dedicated embeddings server** (separate from LLM, configurable via `LLMPROXY_OAIEMBEDDINGS_BASE_URL`)
 
 - **TEI-compatible rerank endpoint**: `/v1/rerank`, `/rerank`
@@ -28,8 +28,8 @@ This proxy solves two main problems:
 - **Router-mode aware**: Handles llama-server's slow model loading (20-35 seconds) with appropriate timeouts
 
 - **Global locks**: Optional serialization of chat/embeddings requests to prevent concurrent overload
-  - Enabled via `LLMPROXY_GLOBAL_LOCK=1`
-  - Returns `503 Service Unavailable` with `Retry-After` header when lock is held
+  - Enabled via `LLMPROXY_LOCK_CONFIG` pointing to YAML config file
+  - Returns `503 Service Unavailable` with `Retry-After` header when lock is held (in `locked_error` mode)
   - Rerank, models, and health endpoints run freely without locks
 
 - **Configurable logging**: `LLMPROXY_LOG_LEVEL` (info/debug/trace) for request/response inspection
@@ -66,10 +66,10 @@ Set these environment variables:
 | `LLMPROXY_TEIRERANKER_BASE_URL` | `http://127.0.0.1:8082` | Reranker llama-server URL |
 | `LLMPROXY_TEIRERANKER_API_KEY` | `` | API key for reranker backend (optional) |
 | `LLMPROXY_HOST` | `0.0.0.0` | Proxy listen address |
-| `LLMPROXY_PORT` | `4001` | Proxy listen port |
+| `LLMPROXY_PORT` | `8000` | Proxy listen port |
 | `LLMPROXY_API_KEY` | `` | API key for proxy authentication (enables when set) |
 | `LLMPROXY_LOG_LEVEL` | `info` | Log level: `info`, `debug`, or `trace` |
-| `LLMPROXY_GLOBAL_LOCK` | `` | Enable global lock for chat/embeddings (set to "1" to enable) |
+| `LLMPROXY_LOCK_CONFIG` | `` | Path to YAML config for global locks (optional) |
 
 **Log levels:**
 - **info**: Basic logs (endpoints, status codes, timing)
@@ -77,10 +77,21 @@ Set these environment variables:
 - **trace**: Everything including full text content (prompts, documents, etc.)
 
 **Global lock:**
-- When enabled, serializes requests to `/v1/chat/completions` and `/v1/embeddings` endpoints
+- When enabled via `LLMPROXY_LOCK_CONFIG`, serializes requests based on YAML configuration
 - Prevents concurrent requests from overwhelming llama-server
 - Other endpoints (`/v1/rerank`, `/v1/models`, `/health`) run freely without locks
-- Returns `503 Service Unavailable` with `Retry-After` header when lock is held
+- Returns `503 Service Unavailable` with `Retry-After` header when lock is held (in `locked_error` mode)
+
+Lock config format (YAML):
+```yaml
+global_lock:
+  enabled: true
+  locked_error: true  # Return 503 instead of blocking
+  /v1/chat/completions:
+    locks: []
+  /v1/embeddings:
+    locks: []
+```
 
 The systemd service defaults to `debug` level.
 
@@ -98,17 +109,19 @@ uv run python -m src.llmproxy.main
 
 ### Example: Enable API key authentication
 ```bash
-export LLMPROXY_PORT=4001
+export LLMPROXY_PORT=8000
 export LLMPROXY_API_KEY=min-hemliga-nyckel
 uv run python -m src.llmproxy.main
 ```
 
-When `LLMPROXY_PORT` and `LLMPROXY_API_KEY` are both set, the proxy requires API key authentication on all requests. Send the API key in the `Authorization` header:
+When `LLMPROXY_API_KEY` is set, the proxy requires API key authentication on all OpenAI endpoints. Send the API key in the `Authorization` header:
 
-- **Bearer token format**: `Authorization: Bearer min-hemliga-nyckel`
+- **Bearer token format**: `Authorization: Bearer min-he...kel`
 - **Raw format**: `Authorization: min-hemliga-nyckel`
 
 Without a valid API key, requests return `401 Unauthorized`.
+
+Note: TEI endpoints (`/v1/rerank`, `/v1/info`) and health are excluded from API key auth.
 
 Debug log example:
 ```
@@ -123,7 +136,7 @@ Debug log example:
 ```bash
 export LLMPROXY_OAILLM_BASE_URL=http://127.0.0.1:8080
 export LLMPROXY_TEIRERANKER_BASE_URL=http://127.0.0.1:8082
-export LLMPROXY_PORT=4001
+export LLMPROXY_PORT=8000
 
 uv run python -m src.llmproxy.main
 ```
@@ -139,12 +152,12 @@ sudo systemctl status llmproxy
 
 **List models:**
 ```bash
-curl http://localhost:4001/v1/models
+curl http://localhost:8000/v1/models
 ```
 
 **Chat completion (non-streaming):**
 ```bash
-curl -X POST http://localhost:4001/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen3.6-dense-mtp-custom",
@@ -155,7 +168,7 @@ curl -X POST http://localhost:4001/v1/chat/completions \
 
 **Chat completion (streaming):**
 ```bash
-curl -X POST http://localhost:4001/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen3.6-dense-mtp-custom",
@@ -164,9 +177,9 @@ curl -X POST http://localhost:4001/v1/chat/completions \
   }'
 ```
 
-**Completions (auto-selects first available model):**
+**Completions (uses model='default' if not specified):**
 ```bash
-curl -X POST http://localhost:4001/v1/completions \
+curl -X POST http://localhost:8000/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "Once upon a time",
@@ -176,7 +189,7 @@ curl -X POST http://localhost:4001/v1/completions \
 
 **Embeddings:**
 ```bash
-curl -X POST http://localhost:4001/v1/embeddings \
+curl -X POST http://localhost:8000/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{
     "model": "bge-m3",
@@ -188,7 +201,7 @@ curl -X POST http://localhost:4001/v1/embeddings \
 
 **Rerank (TEI format with bge-reranker-v2-m3):**
 ```bash
-curl -X POST http://localhost:4001/v1/rerank \
+curl -X POST http://localhost:8000/v1/rerank \
   -H "Content-Type: application/json" \
   -d '{
     "model": "bge-reranker-v2-m3",
@@ -201,7 +214,7 @@ curl -X POST http://localhost:4001/v1/rerank \
 
 **Hindsight-compatible format (simplified):**
 ```bash
-curl -X POST http://localhost:4001/v1/rerank \
+curl -X POST http://localhost:8000/v1/rerank \
   -H "Content-Type: application/json" \
   -d '{
     "query": "machine learning",
