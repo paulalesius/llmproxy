@@ -132,6 +132,11 @@ def load_lock_config():
                     if lock_item in BACKEND_NAME_TO_ENUM:
                         locks_to_acquire.add(BACKEND_NAME_TO_ENUM[lock_item])
             
+            # Validate: backend should not lock itself
+            if backend_enum in locks_to_acquire:
+                logger.warning(f"Backend {backend_name} is configured to lock itself - this may cause deadlock")
+                locks_to_acquire.discard(backend_enum)
+            
             if locks_to_acquire:
                 backend_lock_mapping[backend_enum] = locks_to_acquire
                 lock_names = [b.value for b in locks_to_acquire]
@@ -234,19 +239,20 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
                         locked_error = lock_config.get("locked_error", False)
                         
                         if locked_error:
-                            # Check if any lock is already held
-                            for lock in locks_to_acquire:
-                                if lock.locked():
-                                    return JSONResponse(
-                                        status_code=503,
-                                        content={
-                                            "error": {
-                                                "message": f"Service temporarily busy, {path_backend.value} backend is locked",
-                                                "type": "service_busy",
-                                                "retry_after": 2
-                                            }
+                            # Best-effort check: om någon av locks är upptagen → 503 direkt
+                            if any(lock.locked() for lock in locks_to_acquire):
+                                return JSONResponse(
+                                    status_code=503,
+                                    content={
+                                        "error": {
+                                            "message": f"Service temporarily busy, {path_backend.value} backend is locked",
+                                            "type": "service_busy",
+                                            "retry_after": 2
                                         }
-                                    )
+                                    }
+                                )
+                            
+                            # Alla var lediga → lås dem
                             for lock in locks_to_acquire:
                                 await lock.acquire()
                         else:
@@ -385,32 +391,20 @@ async def health():
 @app.get("/info")
 @app.get("/v1/info")
 async def info():
-    """TEI /info endpoint - returns model info from llama-server."""
-    try:
-        response = await app.state.tei.client.get("/v1/models")
-        if response.status_code == 200:
-            models = response.json()
-            return {
-                "model_id": models[0]["id"] if models else "unknown",
-                "smart_prefix": True,
-                "revision": "llama-server",
-                "sha256": "unknown",
-                "pool_size": 1,
-                "max_concurrent_requests": 8,
-                "max_client_batch_size": 128,
-                "max_chunks_per_doc": 128,
-                "num_queries": 1024,
-                "num_pairs": 1024,
-                "num_passages": 1024,
-                "num_tokens": 1024,
-                "embedding_dim": 1024,
-            }
-    except Exception:
-        pass
+    """TEI /info endpoint - returns static model info."""
     return {
         "model_id": "rerank-model",
         "smart_prefix": True,
         "revision": "llama-server",
+        "pool_size": 1,
+        "max_concurrent_requests": 8,
+        "max_client_batch_size": 128,
+        "max_chunks_per_doc": 128,
+        "num_queries": 1024,
+        "num_pairs": 1024,
+        "num_passages": 1024,
+        "num_tokens": 1024,
+        "embedding_dim": 1024,
     }
 
 
@@ -421,8 +415,7 @@ async def rerank(request: dict):
     from pydantic import TypeAdapter
     from .components.tei import RerankRequest
 
-    import logging
-    logging.info(f"LLMPROXY RERANK REQUEST: query='{request.get('query', 'N/A')[:100]}', "
+    logger.info(f"LLMPROXY RERANK REQUEST: query='{request.get('query', 'N/A')[:100]}', "
                  f"model='{request.get('model', 'N/A')}', "
                  f"texts={len(request.get('texts', []))}, "
                  f"documents={len(request.get('documents', []))}, "
@@ -431,7 +424,7 @@ async def rerank(request: dict):
     adapter = TypeAdapter(RerankRequest)
     parsed = adapter.validate_python(request)
 
-    logging.info(f"LLMPROXY PARSED: model='{parsed.model}', query='{parsed.query[:80]}...', "
+    logger.info(f"LLMPROXY PARSED: model='{parsed.model}', query='{parsed.query[:80]}...', "
                  f"docs={len(parsed.documents) if parsed.documents else 0}")
 
     result = await app.state.tei.rerank(parsed)

@@ -18,31 +18,27 @@ global_lock:
   # If false (default), block/wait until lock is available
   locked_error: false
   
-  # LLM endpoints lock the entire LLM backend
-  /v1/chat/completions:
+  # Backend-based locking (recommended)
+  # Each backend lists which OTHER backends it locks
+  # When a backend runs, all backends in its 'locks' list are locked
+  
+  # LLM backend locks embeddings and reranker
+  llm:
+    locks:
+      - embed
+      - rerank
+  
+  # Embeddings backend locks LLM and reranker
+  embed:
     locks:
       - llm
+      - rerank
   
-  /v1/completions:
+  # Reranker backend locks LLM and embeddings
+  rerank:
     locks:
       - llm
+      - embed
   
-  # Embeddings endpoint locks the embeddings backend
-  /v1/embeddings:
-    locks:
-      - embeddings
-  
-  # Reranker endpoints lock the reranker backend
-  /v1/rerank:
-    locks:
-      - reranker
-  
-  /rerank:
-    locks:
-      - reranker
-  
-  # Endpoints without an entry run freely:
-  # - /health
-  # - /info, /v1/info
-  # - /v1/models
-  # - / (root)
+  # Note: backends don't lock themselves - only OTHER backends
+  # This prevents deadlock and allows concurrent access to same backend
