@@ -8,7 +8,7 @@ import logging
 import json
 from typing import Optional, Tuple, Any
 import httpx
-from . import config
+from .. import config
 
 logger = logging.getLogger(__name__)
 

@@ -9,7 +9,7 @@ import json
 from typing import List, Optional, Any
 from pydantic import BaseModel
 import httpx
-from . import config
+from .. import config
 
 logger = logging.getLogger(__name__)
 

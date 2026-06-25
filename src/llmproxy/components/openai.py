@@ -9,7 +9,7 @@ import json
 from typing import Optional, Tuple, Any
 from fastapi.responses import StreamingResponse, JSONResponse
 import httpx
-from . import config
+from .. import config
 
 logger = logging.getLogger(__name__)
 
