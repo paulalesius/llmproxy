@@ -3,13 +3,12 @@ TEI (Text Embeddings Inference) compatible rerank endpoint.
 Proxies to llama-server rerank endpoint.
 """
 
-import os
 import logging
 import json
 from typing import List, Optional, Any
 from pydantic import BaseModel
 import httpx
-from .. import config
+from ..config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -93,16 +92,16 @@ class TEIComponent:
     """Proxy component for TEI rerank API."""
     
     def __init__(self):
-        self.base_url = os.environ.get(
-            "LLMPROXY_RERANK_BASE_URL",
-            "http://127.0.0.1:8082"
-        )
-        self.api_key = os.environ.get("LLMPROXY_RERANK_API_KEY", "")
+        config = get_config()
+        backend_config = config.backends.get("rerank")
+        
+        self.base_url = backend_config.base_url if backend_config.base_url else "http://127.0.0.1:8082"
+        self.api_key = backend_config.api_key if backend_config else ""
         
         # Set timeout to 60s for large batches (Hindsight can send 1500+ docs)
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
-            timeout=httpx.Timeout(config.TEIRERANKER_TIMEOUT, read=config.TEIRERANKER_READ_TIMEOUT)
+            timeout=httpx.Timeout(backend_config.timeout, read=backend_config.read_timeout)
         )
         
         logger.info(f"TEIComponent initialized: base_url={self.base_url}, api_key={'*' * 8 if self.api_key else '(none)'}")
@@ -114,7 +113,8 @@ class TEIComponent:
         import time
         start = time.time()
         
-        log_level = os.environ.get("LLMPROXY_LOG_LEVEL", "info").lower()
+        config = get_config()
+        log_level = config.server.log_level
         
         # Build payload (don't mutate the request object)
         documents = request.documents

@@ -3,12 +3,11 @@ OpenAI-compatible embeddings endpoint.
 Proxies to dedicated embeddings llama-server instance.
 """
 
-import os
 import logging
 import json
 from typing import Optional, Tuple, Any
 import httpx
-from .. import config
+from ..config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -56,16 +55,16 @@ class EmbeddingsComponent:
     """Proxy component for OpenAI-compatible embeddings endpoint."""
 
     def __init__(self):
-        self.base_url = os.environ.get(
-            "LLMPROXY_EMBED_BASE_URL",
-            "http://127.0.0.1:8081"
-        )
-        self.api_key = os.environ.get("LLMPROXY_EMBED_API_KEY", "")
+        config = get_config()
+        backend_config = config.backends.get("embed")
+        
+        self.base_url = backend_config.base_url if backend_config.base_url else "http://127.0.0.1:8081"
+        self.api_key = backend_config.api_key if backend_config else ""
         
         # Embeddings are typically fast, but allow for batch processing
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
-            timeout=httpx.Timeout(config.OAIEMBEDDINGS_TIMEOUT, read=config.OAIEMBEDDINGS_READ_TIMEOUT)
+            timeout=httpx.Timeout(backend_config.timeout, read=backend_config.read_timeout)
         )
         
         logger.info(f"EmbeddingsComponent initialized: base_url={self.base_url}, api_key={'*' * 8 if self.api_key else '(none)'}")
@@ -75,11 +74,13 @@ class EmbeddingsComponent:
         import time
         start = time.time()
         
+        config = get_config()
+        log_level = config.server.log_level
+        
         req_headers = {}
         if self.api_key:
             req_headers["Authorization"] = f"Bearer {self.api_key}"
         
-        log_level = os.environ.get("LLMPROXY_LOG_LEVEL", "info").lower()
         if log_level in ["debug", "trace"]:
             _log_request(log_level, path, method, json, req_headers)
         
@@ -118,7 +119,8 @@ class EmbeddingsComponent:
             body: Request body with 'input' and optionally 'model'
             return_response: If True, return (body, status_code) tuple
         """
-        log_level = os.environ.get("LLMPROXY_LOG_LEVEL", "info").lower()
+        config = get_config()
+        log_level = config.server.log_level
         
         if log_level == "info":
             logger.info(f"embeddings request: model={body.get('model', 'default')}, "

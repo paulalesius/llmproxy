@@ -12,6 +12,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from uvicorn import Config, Server
 import yaml
+
+from .config import load_config, get_config, Config
 from .components.tei import TEIComponent
 from .backend import Backend, BACKEND_NAME_TO_ENUM, get_backend_for_path
 from .components.embeddings import EmbeddingsComponent
@@ -29,24 +31,27 @@ def parse_args():
         "-c", "--config",
         type=str,
         default=None,
-        help="Path to config.yaml for global locks and main configuration"
+        help="Path to config.yaml for configuration"
     )
     return parser.parse_args()
 
-# API key configuration
-# API key protection is enabled when LLMPROXY_API_KEY is set
-LLMPROXY_PORT = os.environ.get("LLMPROXY_PORT")
-LLMPROXY_API_KEY = os.environ.get("LLMPROXY_API_KEY", "").strip()
-API_KEY_ENABLED = bool(LLMPROXY_API_KEY)  # Enabled when API key is set
 
-# Configure logging level from environment
-log_level = os.environ.get("LLMPROXY_LOG_LEVEL", "info").lower()
+# Parse args early
+args = parse_args()
+
+# Load configuration
+CONFIG = load_config(args.config)
+from .config import set_config
+set_config(CONFIG)
+
+# Configure logging level from config
+log_level = CONFIG.server.log_level.lower()
 LOG_LEVELS = {
     "debug": logging.DEBUG,
     "info": logging.INFO,
     "warning": logging.WARNING,
     "error": logging.ERROR,
-    "trace": logging.DEBUG  # trace uses DEBUG level but we filter in code
+    "trace": logging.DEBUG,  # trace uses DEBUG level but we filter in code
 }
 logging.basicConfig(
     level=LOG_LEVELS.get(log_level, logging.INFO),
@@ -54,22 +59,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Global lock configuration
-# Disabled by default unless explicitly enabled via backends.global_lock in config file
-# Use -c/--config flag to specify config path
-args = parse_args()
-LOCK_CONFIG_PATH = args.config
 
-# Lock script - single script that runs during locked request execution
-# Can be:
-#   1. Python script (.py) - loads as module with handle_request()
-#   2. Shell script (.sh, .bash) - loads as executable script
-#   3. Bash command - raw command string (if not a file)
-LOCK_SCRIPT_PATH = os.environ.get("LLMPROXY_LOCK_SCRIPT", "")
+# API key configuration
+API_KEY_ENABLED = bool(CONFIG.server.api_key)
+
 
 # Lock state - initialized in lifespan
-# Backend-based locking: one lock per backend, not per path
-lock_config: Optional[dict] = None
 backend_locks: Dict[Backend, asyncio.Lock] = {}
 
 # Script hooks - initialized in lifespan
@@ -77,123 +72,77 @@ lock_script_hook: Optional[dict] = None
 
 
 def load_lock_config():
-    """Load global lock configuration from YAML file.
+    """Load global lock configuration from config object.
     
     Backend-based locking: each backend lists which OTHER backends to lock.
-    Example config:
-      llm:
-        locks:
-          - embed
-          - rerank
-      embed:
-        locks:
-          - llm
-          - rerank
-      rerank:
-        locks:
-          - llm
-          - embed
     """
-    global lock_config, backend_locks
+    global backend_locks
     
-    if not LOCK_CONFIG_PATH:
-        logger.info("Global lock disabled (-c/--config not set)")
-        lock_config = {"enabled": False}
+    if not CONFIG.global_lock.enabled:
+        logger.info("Global lock disabled")
         return
     
-    if not os.path.exists(LOCK_CONFIG_PATH):
-        logger.warning(f"Lock config not found at {LOCK_CONFIG_PATH}, running without locks")
-        lock_config = {"enabled": False}
-        return
+    # Create one lock per backend
+    backend_locks = {backend: asyncio.Lock() for backend in Backend}
     
-    try:
-        with open(LOCK_CONFIG_PATH, "r") as f:
-            config = yaml.safe_load(f) or {}
+    # Parse backend-based configuration
+    backend_lock_mapping: dict[Backend, set[Backend]] = {}
+    
+    for backend_name, config_entry in CONFIG.backends.items():
+        if backend_name not in BACKEND_NAME_TO_ENUM:
+            logger.warning(f"Unknown backend in config: {backend_name}")
+            continue
         
-        lock_config = config.get("backends", {})
+        backend_enum = BACKEND_NAME_TO_ENUM[backend_name]
+        locks_to_acquire: set[Backend] = set()
         
-        if lock_config is None:
-            logger.info("Global lock: no config found, disabled by default")
-            lock_config = {}
-            return
+        # Get locks from BackendConfig object
+        if hasattr(config_entry, 'locks'):
+            for lock_item in config_entry.locks:
+                if lock_item in BACKEND_NAME_TO_ENUM:
+                    locks_to_acquire.add(BACKEND_NAME_TO_ENUM[lock_item])
+                else:
+                    logger.warning(f"Unknown lock for {backend_name}: {lock_item}")
         
-        if not lock_config.get("global_lock", False):
-            logger.info("Global lock: config found but not enabled")
-            return
+        # Validate: backend should not lock itself
+        if backend_enum in locks_to_acquire:
+            logger.warning(f"Backend {backend_name} is configured to lock itself - this may cause deadlock")
+            locks_to_acquire.discard(backend_enum)
         
-        # Create one lock per backend
-        backend_locks = {backend: asyncio.Lock() for backend in Backend}
-        
-        # Parse backend-based configuration
-        # Each backend lists which OTHER backends it should lock
-        backend_lock_mapping: dict[Backend, set[Backend]] = {}
-        
-        for backend_name, config_entry in lock_config.items():
-            if backend_name == "enabled":
-                continue
-            
-            # Get Backend enum from string name
-            if backend_name not in BACKEND_NAME_TO_ENUM:
-                logger.warning(f"Unknown backend in config: {backend_name}")
-                continue
-            
-            backend_enum = BACKEND_NAME_TO_ENUM[backend_name]
-            locks_to_acquire: set[Backend] = set()
-            
-            if isinstance(config_entry, dict):
-                for lock_item in config_entry.get("locks", []):
-                    if lock_item in BACKEND_NAME_TO_ENUM:
-                        locks_to_acquire.add(BACKEND_NAME_TO_ENUM[lock_item])
-                    else:
-                        logger.warning(f"Unknown lock for {backend_name}: {lock_item}")
-            
-            elif isinstance(config_entry, list):
-                for lock_item in config_entry:
-                    if lock_item in BACKEND_NAME_TO_ENUM:
-                        locks_to_acquire.add(BACKEND_NAME_TO_ENUM[lock_item])
-            
-            # Validate: backend should not lock itself
-            if backend_enum in locks_to_acquire:
-                logger.warning(f"Backend {backend_name} is configured to lock itself - this may cause deadlock")
-                locks_to_acquire.discard(backend_enum)
-            
-            if locks_to_acquire:
-                backend_lock_mapping[backend_enum] = locks_to_acquire
-                lock_names = [b.value for b in locks_to_acquire]
-                logger.info(f"Backend {backend_name} locks: {lock_names}")
-            else:
-                logger.info(f"Backend {backend_name} has no locks configured")
-        
-        # Store the mapping in lock_config for middleware to use
-        lock_config["backend_locks"] = backend_lock_mapping
-        
-        logger.info(f"Global lock enabled with {len(backend_locks)} backend locks")
-        
-    except Exception as e:
-        logger.error(f"Failed to load lock config: {e}")
+        if locks_to_acquire:
+            backend_lock_mapping[backend_enum] = locks_to_acquire
+            lock_names = [b.value for b in locks_to_acquire]
+            logger.info(f"Backend {backend_name} locks: {lock_names}")
+        else:
+            logger.info(f"Backend {backend_name} has no locks configured")
+    
+    # Store the mapping for middleware to use
+    CONFIG.backend_lock_mapping = backend_lock_mapping
+    
+    logger.info(f"Global lock enabled with {len(backend_locks)} backend locks")
 
 
 def load_lock_script():
     """Load lock script hook (Python, shell script, or bash command)."""
     global lock_script_hook
     
-    if not LOCK_SCRIPT_PATH:
+    if not CONFIG.global_lock.lock_script:
         lock_script_hook = None
-        logger.info("Lock script disabled (LLMPROXY_LOCK_SCRIPT not set)")
+        logger.info("Lock script disabled")
         return
     
     # Import the loader function to avoid name collision
     from .script_loader import load_lock_script as load_script_from_path
     
     # Use the new load_lock_script() function that handles all three modes
-    hook = load_script_from_path(LOCK_SCRIPT_PATH)
+    hook = load_script_from_path(CONFIG.global_lock.lock_script)
     lock_script_hook = hook
     
     if hook["error"]:
         logger.warning(f"Lock script: {hook['error']}")
     else:
         if hook["type"] == "python":
-            logger.info(f"Lock script loaded (Python): {LOCK_SCRIPT_PATH}")
+            logger.info(f"Lock script loaded (Python): {CONFIG.global_lock.lock_script}")
             if hook["handle_request"]:
                 logger.info("  - has handle_request() function")
             else:
@@ -211,25 +160,18 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
     Backend-based locking: each backend has one shared lock.
     When a path is accessed, the backend it belongs to acquires locks
     for all OTHER backends configured in lock_config.
-    
-    Example: if /v1/chat/completions is called:
-    1. Path belongs to LLM backend
-    2. LLM backend is configured to lock [embed, rerank]
-    3. Acquire locks for embed and rerank backends
-    4. Execute request
-    5. Release locks
     """
     
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         
-        if lock_config and lock_config.get("enabled"):
+        if CONFIG.global_lock.enabled:
             # Get the backend for this path
             path_backend = get_backend_for_path(path)
             
             if path_backend:
                 # Get which backends this backend should lock
-                backend_locks_mapping = lock_config.get("backend_locks", {})
+                backend_locks_mapping = getattr(CONFIG, 'backend_lock_mapping', {})
                 locks_to_acquire_backends = backend_locks_mapping.get(path_backend, set())
                 
                 if locks_to_acquire_backends:
@@ -242,7 +184,7 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
                     if locks_to_acquire:
                         logger.info(f"[GlobalLock] {path} ({path_backend.value}) acquiring locks for: {[b.value for b in locks_to_acquire_backends]}")
                         
-                        locked_error = lock_config.get("locked_error", False)
+                        locked_error = CONFIG.global_lock.locked_error
                         
                         if locked_error:
                             # Best-effort check: om någon av locks är upptagen → 503 direkt
@@ -334,9 +276,9 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         auth_header = request.headers.get("Authorization", "")
-        expected_prefix = f"Bearer {LLMPROXY_API_KEY}"
+        expected_prefix = f"Bearer {CONFIG.server.api_key}"
 
-        if auth_header != expected_prefix and auth_header != LLMPROXY_API_KEY:
+        if auth_header != expected_prefix and auth_header != CONFIG.server.api_key:
             logger.warning(f"API key mismatch on {path}")
             return JSONResponse(
                 status_code=401,
@@ -377,9 +319,6 @@ app = FastAPI(
 app.add_middleware(GlobalLockMiddleware)
 app.add_middleware(APIKeyMiddleware)
 app.add_middleware(LoggingMiddleware)
-
-
-# No need for on_event decorators anymore
 
 
 @app.get("/")
@@ -489,5 +428,4 @@ async def openai_embeddings(request: dict):
 if __name__ == "__main__":
     import uvicorn
     
-    port = int(os.environ.get("LLMPROXY_PORT", 4001))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host=CONFIG.server.host, port=CONFIG.server.port)

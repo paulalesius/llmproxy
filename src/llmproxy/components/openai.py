@@ -3,13 +3,12 @@ OpenAI-compatible proxy for llama-server.
 Routes OpenAI API endpoints to llama-server's OpenAI-compatible API.
 """
 
-import os
 import logging
 import json
 from typing import Optional, Tuple, Any
 from fastapi.responses import StreamingResponse, JSONResponse
 import httpx
-from .. import config
+from ..config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -63,16 +62,16 @@ class OpenAIComponent:
     """Proxy component for OpenAI-compatible endpoints."""
 
     def __init__(self):
-        self.base_url = os.environ.get(
-            "LLMPROXY_LLM_BASE_URL",
-            "http://127.0.0.1:8080"
-        )
-        self.api_key = os.environ.get("LLMPROXY_LLM_API_KEY", "")
+        config = get_config()
+        backend_config = config.backends.get("llm")
+        
+        self.base_url = backend_config.base_url if backend_config.base_url else "http://127.0.0.1:8080"
+        self.api_key = backend_config.api_key if backend_config else ""
         
         # Router-mode: model loading can take 20s+, use config timeouts
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
-            timeout=httpx.Timeout(config.OAILLM_TIMEOUT, read=config.OAILLM_READ_TIMEOUT)
+            timeout=httpx.Timeout(backend_config.timeout, read=backend_config.read_timeout)
         )
         
         logger.info(f"OpenAIComponent initialized: base_url={self.base_url}, api_key={'*' * 8 if self.api_key else '(none)'}")
@@ -80,10 +79,13 @@ class OpenAIComponent:
     async def _forward_with_status(self, method: str, path: str, json: Optional[dict] = None, headers: Optional[dict] = None) -> Tuple[Any, int]:
         """
         Forward a request to llama-server and return (response_body, status_code).
-        Logs request/response based on LLMPROXY_LOG_LEVEL.
+        Logs request/response based on log level.
         """
         import time
         start = time.time()
+        
+        config = get_config()
+        log_level = config.server.log_level
         
         # Build headers
         req_headers = headers or {}
@@ -91,7 +93,6 @@ class OpenAIComponent:
             req_headers["Authorization"] = f"Bearer {self.api_key}"
         
         # Log request
-        log_level = os.environ.get("LLMPROXY_LOG_LEVEL", "info").lower()
         if log_level in ["debug", "trace"]:
             _log_request(log_level, path, method, json, req_headers)
         
@@ -143,8 +144,10 @@ class OpenAIComponent:
             return_response: If True, return (StreamingResponse, status_code) for streaming,
                            or (body, status_code) for non-streaming.
         """
+        config = get_config()
+        log_level = config.server.log_level
+        
         is_stream = body.get("stream", False)
-        log_level = os.environ.get("LLMPROXY_LOG_LEVEL", "info").lower()
         
         if is_stream:
             logger.info(f"chat_completions streaming request for model={body.get('model')}")
@@ -156,11 +159,12 @@ class OpenAIComponent:
         
         if is_stream:
             try:
+                backend_config = config.backends.get("llm")
                 resp = await self.client.post(
                     "/v1/chat/completions",
                     json=body,
                     headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
-                    timeout=httpx.Timeout(config.OAILLM_TIMEOUT, read=config.OAILLM_READ_TIMEOUT + 210)
+                    timeout=httpx.Timeout(backend_config.timeout, read=backend_config.read_timeout + 210)
                 )
                 resp.raise_for_status()
 
@@ -193,7 +197,8 @@ class OpenAIComponent:
 
     async def completions(self, body: dict, return_response: bool = False):
         """POST /v1/completions."""
-        log_level = os.environ.get("LLMPROXY_LOG_LEVEL", "info").lower()
+        config = get_config()
+        log_level = config.server.log_level
         
         if log_level in ["debug", "trace"]:
             logger.debug(f"completions request: model={body.get('model')}, stream={body.get('stream', False)}")
@@ -211,11 +216,12 @@ class OpenAIComponent:
                 _log_request("trace", "/v1/completions", "POST", body)
             
             try:
+                backend_config = config.backends.get("llm")
                 resp = await self.client.post(
                     "/v1/completions",
                     json=body,
                     headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
-                    timeout=httpx.Timeout(config.OAILLM_TIMEOUT, read=config.OAILLM_READ_TIMEOUT + 30)
+                    timeout=httpx.Timeout(backend_config.timeout, read=backend_config.read_timeout + 30)
                 )
                 resp.raise_for_status()
                 

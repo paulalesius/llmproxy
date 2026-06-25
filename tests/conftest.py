@@ -9,13 +9,15 @@ from pathlib import Path
 
 
 # Test configuration
-TEST_PORT = int(os.environ.get("LLMPROXY_TEST_PORT", "4002"))
+TEST_PORT = 4002
 TEST_PID_FILE = Path("/tmp/llmproxy_test.pid")
 
-# Backend URLs (use environment or defaults)
-LLAMA_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8080")
-TEI_URL = os.environ.get("LLMPROXY_TEI_BASE_URL", "http://127.0.0.1:8082")
-EMBEDDINGS_URL = os.environ.get("LLMPROXY_EMBED_BASE_URL", "http://127.0.0.1:8081")
+
+def pytest_configure():
+    """Get test config path."""
+    project_root = Path(__file__).parent.parent
+    config_path = project_root / "config.test.yaml"
+    os.environ["LLMPROXY_TEST_CONFIG"] = str(config_path)
 
 
 @pytest.fixture(scope="session")
@@ -25,17 +27,12 @@ def llmproxy_server():
     Yields the base URL, handles cleanup on session end.
     """
     project_root = Path(__file__).parent.parent
-    env = os.environ.copy()
-    env["LLMPROXY_PORT"] = str(TEST_PORT)
-    env["LLMPROXY_RERANK_BASE_URL"] = TEI_URL
-    env["LLMPROXY_LLM_BASE_URL"] = LLAMA_URL
-    env["LLMPROXY_EMBED_BASE_URL"] = EMBEDDINGS_URL
+    config_path = project_root / "config.test.yaml"
     
-    # Start server
+    # Start server with config file
     proc = subprocess.Popen(
-        ["python3", "-m", "src.llmproxy.main"],
+        ["python3", "-m", "src.llmproxy.main", "-c", str(config_path)],
         cwd=str(project_root),
-        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
