@@ -165,8 +165,11 @@ def load_lock_script():
         logger.info("Lock script disabled (LLMPROXY_LOCK_SCRIPT not set)")
         return
     
+    # Import the loader function to avoid name collision
+    from .script_loader import load_lock_script as load_script_from_path
+    
     # Use the new load_lock_script() function that handles all three modes
-    hook = load_lock_script(LOCK_SCRIPT_PATH)
+    hook = load_script_from_path(LOCK_SCRIPT_PATH)
     lock_script_hook = hook
     
     if hook["error"]:

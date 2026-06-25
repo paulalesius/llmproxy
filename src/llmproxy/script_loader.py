@@ -181,7 +181,7 @@ def execute_lock_script(hook: dict, request_data: dict = None) -> dict:
                 "error": None
             }
         
-        elif hook.get("type") == "shell":
+        elif hook.get("type") in ("shell", "command"):
             # Shell script or bash command execution
             script_path = hook.get("path")
             command = hook.get("command")

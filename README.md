@@ -161,7 +161,7 @@ uv run python -m src.llmproxy.main
 | `LLMPROXY_LOG_LEVEL`            | `info` / `debug` / `trace`                                                  | `info`      |
 | `LLMPROXY_API_KEY`              | Enable API key protection on OpenAI endpoints when set                      | —           |
 | `LLMPROXY_LOCK_CONFIG`          | Path to `config.yaml` for global locks                                      | —           |
-| `LLMPROXY_LOCK_SCRIPT`          | Path to Python (.py) or shell (.sh/.bash) script executed during locked requests | —           |
+| `LLMPROXY_LOCK_SCRIPT`          | Python (.py) / Shell (.sh/.bash) / Bash command executed during locked requests | —           |
 
 ### Backend Timeouts (in seconds)
 
@@ -261,6 +261,18 @@ def handle_request(request_data):
         print(f"Response status: {request_data.get('response_status')}")
     print(f"Request to {request_data.get('path')}")
 ```
+
+**Bash commands (raw command string):**
+- If `LLMPROXY_LOCK_SCRIPT` is not a file path, it's treated as a raw bash command
+- Same environment variables as shell scripts
+- Example: `LLMPROXY_LOCK_SCRIPT="echo 'Lock acquired' >> /var/log/llmproxy.lock"`
+
+**Mode detection:**
+1. If path ends with `.py` → Python script
+2. If path ends with `.sh` or `.bash` → Shell script
+3. If path is a file with other extension → Shell script
+4. If path is not a file → Bash command
+
 
 ## Usage Examples
 
