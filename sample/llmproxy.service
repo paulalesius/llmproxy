@@ -31,11 +31,11 @@ Environment=LLMPROXY_LOG_LEVEL=debug
 Environment=LLMPROXY_LOCK_SCRIPT=/etc/llmproxy/hook.py
 
 # Lock configuration (optional)
-Environment=LLMPROXY_CONFIG=/etc/llmproxy/config.yaml
+# Use -c flag to specify config path
 
 # Setup and start
 ExecStartPre=/home/noname/.local/bin/uv sync
-ExecStart=/src/llmproxy/.venv/bin/python -m src.llmproxy.main
+ExecStart=/src/llmproxy/.venv/bin/python -m src.llmproxy.main -c /etc/llmproxy/config.yaml
 Restart=on-failure
 TimeoutStopSec=90s
 RestartSec=5

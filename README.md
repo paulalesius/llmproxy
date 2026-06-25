@@ -43,6 +43,7 @@ It also adds important production features that llama-server alone does not prov
 - **Configurable Logging**: Three levels (`info`, `debug`, `trace`) with intelligent truncation of large prompts/documents.
 - **Router-Mode Optimized**: Generous timeouts and graceful handling of slow model loading (20–35 s on first request to a model in router mode).
 - **Accurate Error Propagation**: All backend HTTP status codes (400, 429, 500, 504, etc.) are forwarded correctly to the client.
+- **CLI Configuration**: Use `-c/--config` flag to specify config file path (replaces `LLMPROXY_CONFIG` env var)
 
 ## Architecture
 
@@ -139,7 +140,7 @@ export LLMPROXY_EMBED_BASE_URL=http://127.0.0.1:8081
 export LLMPROXY_RERANK_BASE_URL=http://127.0.0.1:8082
 export LLMPROXY_PORT=8000
 
-uv run python -m src.llmproxy.main
+uv run python -m src.llmproxy.main -c /path/to/config.yaml
 ```
 
 ## Configuration Reference
@@ -160,7 +161,7 @@ uv run python -m src.llmproxy.main
 | `LLMPROXY_HOST`                 | Listen address                                                              | `0.0.0.0`   |
 | `LLMPROXY_LOG_LEVEL`            | `info` / `debug` / `trace`                                                  | `info`      |
 | `LLMPROXY_API_KEY`              | Enable API key protection on OpenAI endpoints when set                      | —           |
-| `LLMPROXY_CONFIG`               | Path to `config.yaml` for global locks and main configuration               | —           |
+| `-c, --config PATH`             | Path to `config.yaml` for global locks and main configuration               | —           |
 | `LLMPROXY_LOCK_SCRIPT`          | Python (.py) / Shell (.sh/.bash) / Bash command executed during locked requests | —           |
 
 ### Backend Timeouts (in seconds)
@@ -339,7 +340,7 @@ sudo systemctl enable --now llmproxy
 sudo systemctl status llmproxy
 ```
 
-The service file already contains sensible defaults and runs `uv sync` on start.
+The service file needs to be updated to use `-c` flag instead of `LLMPROXY_CONFIG` env var.
 
 ## Design Philosophy & Known Behaviors
 
@@ -368,13 +369,14 @@ return JSONResponse(content=result, status_code=int(status))
 2. Verify backend names are correct (`llm`, `embed`, `rerank`)
 3. Ensure backends don't lock themselves (no `llm` in `llm.locks`)
 4. Check `/v1/models/xxx` paths are matched (prefix matching in `backend.py`)
+5. Pass config file with `-c /path/to/config.yaml` flag
 
 ### uv location
 
 `uv` is in `~/.local/bin/uv` (or `~/.cargo/bin/uv` if installed via cargo). Add to PATH or use full path:
 
 ```bash
-~/.local/bin/uv run python -m src.llmproxy.main
+~/.local/bin/uv run python -m src.llmproxy.main -c /path/to/config.yaml
 ```
 
 ### Dynamic paths not matched for locking
@@ -403,16 +405,16 @@ Run integration tests:
 
 ```bash
 cd /src/llmproxy
-uv run pytest tests/test_global_locks.py -v
+uv run python -m src.llmproxy.main -c /path/to/config.yaml
 ```
 
-Expected: All 13 global lock tests pass
+Expected: All 13 global lock tests pass (backend servers must be running)
 
 Full test suite:
 
 ```bash
 cd /src/llmproxy
-uv run pytest -v
+uv run python -m src.llmproxy.main -c /path/to/config.yaml
 ```
 
 Expected: 38/38 tests pass (backend servers must be running)

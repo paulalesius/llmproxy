@@ -1,6 +1,8 @@
 """LLM Proxy - Multi-service proxy server."""
 
 import os
+import sys
+import argparse
 import logging
 import asyncio
 from contextlib import asynccontextmanager
@@ -16,6 +18,20 @@ from .components.embeddings import EmbeddingsComponent
 from .components.openai import OpenAIComponent
 from .script_loader import load_lock_script, execute_lock_script
 from .logging_middleware import LoggingMiddleware
+
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="LLM Proxy - Multi-service proxy server"
+    )
+    parser.add_argument(
+        "-c", "--config",
+        type=str,
+        default=None,
+        help="Path to config.yaml for global locks and main configuration"
+    )
+    return parser.parse_args()
 
 # API key configuration
 # API key protection is enabled when LLMPROXY_API_KEY is set
@@ -40,8 +56,9 @@ logger = logging.getLogger(__name__)
 
 # Global lock configuration
 # Disabled by default unless explicitly enabled via global_lock.enabled in config file
-# Set global_lock.enabled: true in your config to enable request serialization
-LOCK_CONFIG_PATH = os.environ.get("LLMPROXY_CONFIG")
+# Use -c/--config flag to specify config path
+args = parse_args()
+LOCK_CONFIG_PATH = args.config
 
 # Lock script - single script that runs during locked request execution
 # Can be:
@@ -80,7 +97,7 @@ def load_lock_config():
     global lock_config, backend_locks
     
     if not LOCK_CONFIG_PATH:
-        logger.info("Global lock disabled (LLMPROXY_CONFIG not set)")
+        logger.info("Global lock disabled (-c/--config not set)")
         lock_config = {"enabled": False}
         return
     
