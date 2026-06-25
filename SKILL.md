@@ -13,10 +13,11 @@ Set up and configure the LLM Proxy server that provides OpenAI-compatible and TE
 ## Overview
 
 The LLM Proxy is a FastAPI-based server that:
-- Routes requests to different llama-server backends (LLM + reranker)
+- Routes requests to different llama-server backends (LLM + reranker + embeddings)
 - Provides OpenAI API compatibility (models, chat/completions, embeddings, streaming)
 - Provides TEI rerank compatibility with Hindsight API shims
 - Handles llama-server router-mode quirks (slow model loading, 404 on unloaded models)
+- Backend-based global locking (configure which backends lock each other)
 
 ## Quick Start
 
@@ -25,142 +26,141 @@ cd /src/llmproxy
 
 # Set environment variables
 export LLMPROXY_LLM_BASE_URL=http://127.0.0.1:8080
+export LLMPROXY_EMBED_BASE_URL=http://127.0.0.1:8081
 export LLMPROXY_RERANK_BASE_URL=http://127.0.0.1:8082
-export LLMPROXY_PORT=4001
+export LLMPROXY_PORT=8000
 
 # Start the proxy
 uv run python -m src.llmproxy.main
 ```
 
-## Environment Variables
+**uv location:** `~/.local/bin/uv` or `~/.cargo/bin/uv` (if installed via cargo)
 
-| Variable | Default | Required | Description |
-|----------|---------|----------|-------------|
-| `LLMPROXY_LLM_BASE_URL` | `http://127.0.0.1:8080` | Yes | LLM llama-server URL |
-| `LLMPROXY_LLM_API_KEY` | `` | No | API key for LLM backend |
-| `LLMPROXY_RERANK_BASE_URL` | `http://127.0.0.1:8082` | Yes | Reranker llama-server URL |
-| `LLMPROXY_RERANK_API_KEY` | `` | No | API key for reranker backend |
-| `LLMPROXY_HOST` | `0.0.0.0` | No | Listen address |
-| `LLMPROXY_PORT` | `4001` | No | Listen port |
-| `LLMPROXY_LOG_LEVEL` | `info` | No | Log level: `info`, `debug`, `trace` |
+## Backend-Based Global Locking
 
-**Log levels:**
-- **info**: Basic logs (endpoints, status, timing)
-- **debug**: Full requests/responses with truncated content
-- **trace**: Everything including full text (prompts, documents)
+### Concept
 
-The systemd service defaults to `debug`.
+Each backend (LLM, EMBED, RERANK) has its own lock. When a request hits a path, the proxy:
+1. Identifies the backend for the path
+2. Acquires locks for all backends configured in `config.yaml`
+3. Executes the request
+4. Releases locks
 
-## systemd Service
+**Critical:** Backends do NOT lock themselves. If `llm` locks `embed` and `rerank`, it does NOT lock `llm`.
 
-The project includes `llmproxy.service` for systemd deployment:
+### Configuration
 
-```ini
-[Service]
-Environment="LLMPROXY_LLM_BASE_URL=http://127.0.0.1:8080"
-Environment="LLMPROXY_LLM_API_KEY="
-Environment="LLMPROXY_RERANK_BASE_URL=http://127.0.0.1:8082"
-Environment="LLMPROXY_RERANK_API_KEY="
-Environment="LLMPROXY_HOST=0.0.0.0"
-Environment="LLMPROXY_PORT=4001"
+Edit `src/llmproxy/config.yaml`:
+
+```yaml
+global_lock:
+  enabled: true
+  llm:
+    locks:
+      - embed
+      - rerank
+  embed:
+    locks:
+      - llm
+      - rerank
+  rerank:
+    locks:
+      - llm
+      - embed
 ```
 
-Deploy:
+### Available Backends
+
+- `llm`: `/v1/chat/completions`, `/v1/completions`, `/v1/models`, `/v1/models/{id}`
+- `embed`: `/v1/embeddings`
+- `rerank`: `/v1/rerank`, `/rerank`, `/v1/info`, `/info`
+
+### Common Pitfalls
+
+1. **Backends locking themselves**: Don't put `llm` in `llm.locks`
+2. **Dynamic paths not matched**: Ensure `backend.py` has prefix matching for `/v1/models/{id}`
+3. **Wrong tuple handling**: All endpoints must use `return_response=True`
+
+## Common Issues
+
+### 500 Internal Server Error on embeddings
+
+**Cause**: `openai_embeddings()` endpoint unpacking bug
+
+**Old code (wrong):**
+```python
+result, status = await app.state.embeddings.embeddings(request)  # Missing return_response=True
+return JSONResponse(content=result, status_code=int(status))
+```
+
+**New code (correct):**
+```python
+result, status = await app.state.embeddings.embeddings(request, return_response=True)
+return JSONResponse(content=result, status_code=int(status))
+```
+
+**Why this matters:** When `return_response=False` (default), the method returns only the body dict. When `return_response=True`, it returns `(body, status)` tuple. Unpacking a dict as a tuple causes `ValueError: too many values to unpack`.
+
+### Dynamic paths not matched for locking
+
+**Cause**: `/v1/models/xxx` paths not matched by `get_backend_for_path()`
+
+**Solution**: Ensure `backend.py` has prefix matching:
+
+```python
+def get_backend_for_path(path: str) -> Backend | None:
+    if path in PATH_TO_BACKEND:
+        return PATH_TO_BACKEND[path]
+    # Prefix matching for dynamic paths
+    if path.startswith("/v1/models/") and path != "/v1/models":
+        return Backend.LLM
+    return None
+```
+
+### uv not found
+
+**Cause**: `uv` not in PATH
+
+**Solution**: Use full path:
 ```bash
-sudo cp llmproxy.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now llmproxy
-sudo systemctl status llmproxy
+~/.local/bin/uv run python -m src.llmproxy.main
+# or
+~/.cargo/bin/uv run python -m src.llmproxy.main
 ```
 
 ## Testing
 
-### Integration tests (smoke tests)
+Run integration tests:
 
 ```bash
 cd /src/llmproxy
-bash test.sh
+uv run pytest tests/test_global_locks.py -v
 ```
 
-Tests cover:
-- Health check
-- TEI rerank (full TEI + Hindsight formats)
-- OpenAI models list/detail
-- Chat completions (sync + streaming)
-- Completions (auto-model selection)
-- Embeddings
+Expected: All 13 global lock tests pass
 
-**Expected behavior in router-mode:**
-- Test accepts 500 (model loading) as valid for completions/embeddings
-- Test accepts 404 for `/v1/models/{id}` (unloaded model)
-- Streaming tests verify SSE format (`data:` prefix)
+Full test suite:
 
-### Manual testing
-
-**OpenAI chat (streaming):**
 ```bash
-curl -X POST http://localhost:4001/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"qwen3.6-dense-mtp-custom","messages":[{"role":"user","content":"Hi"}],"stream":true}'
+cd /src/llmproxy
+uv run pytest -v
 ```
 
-Expected: SSE stream with `data: {"id":"...","choices":[...]}...` and `data: [DONE]`
-
-**TEI rerank:**
-```bash
-curl -X POST http://localhost:4001/v1/rerank \
-  -H "Content-Type: application/json" \
-  -d '{"query":"test","documents":["doc1","doc2","doc3"],"top_n":2}'
-```
-
-Expected: JSON array `[{index:0,score:0.92},{index:2,score:0.78}]` with original indices preserved
-
-## Common Issues
-
-### 500 Internal Server Error on completions/embeddings
-
-**Cause**: Model not loaded in router-mode, takes 20-35s to load
-
-**Solution**: Wait for model to load, or preload models by calling `/v1/chat/completions` first
-
-### 404 on `/v1/models/{model_id}`
-
-**Cause**: llama-server router mode returns 404 for unloaded models
-
-**Solution**: This is expected behavior. Use `/v1/models` (list) instead, or load the model first
-
-### Streaming returns 200 but no data
-
-**Check**: Backend is actually streaming (call llama-server directly)
-**Check**: Proxy logs show `streaming request for model=...`
-
-### Rerank returns wrong indices
-
-**Symptom**: `index` field is `0,1,2,...` instead of original document positions
-
-**Cause**: Old code before index fix (v0.1.0+)
-
-**Solution**: Ensure you have `original_index = item.get("index", i)` in `tei.py`
-
-## Architecture
-
-- `main.py`: FastAPI app, route definitions, JSONResponse with status codes
-- `components/openai.py`: OpenAI proxy, streaming detection, `_forward_with_status()` helper
-- `components/tei.py`: TEI rerank, Hindsight shims, index preservation
-
-All use `httpx.AsyncClient` with:
-- OpenAI: 30s connect / 90s read (120s for streaming)
-- TEI: 60s connect / 120s read (for large batches)
+Expected: 38/38 tests pass (backend servers must be running)
 
 ## Key Implementation Details
 
-### Streaming support
+### Tuple handling
 
-Detects `stream: true` in request body, returns `StreamingResponse(resp.aiter_lines(), media_type="text/event-stream")`
+All component methods (`chat_completions`, `embeddings`, `rerank`, etc.) return `(body, status)` tuple when called with `return_response=True`. Ensure all endpoints use this consistently.
 
-### Error forwarding
+### Dynamic path matching
 
-All endpoints return `(body, status)` tuple, `main.py` wraps with `JSONResponse(content=body, status_code=status)`
+`get_backend_for_path()` uses prefix matching for dynamic paths like `/v1/models/{id}`. This ensures all model detail endpoints are matched to LLM backend for locking.
+
+### Index preservation
+
+TEI rerank results preserve original document indices: `index = item.get("index", i)`. This is critical for clients mapping results back to their input arrays.
 
 ### Hindsight compatibility
 
@@ -169,12 +169,19 @@ All endpoints return `(body, status)` tuple, `main.py` wraps with `JSONResponse(
 - Auto-default `model="reranker"` if missing
 - Auto-default `documents=["no documents provided"]` if empty
 
-### Index preservation
+## Architecture
 
-TEI rerank results: `index = item.get("index", i)` preserves backend's original document index, not sorted position
+- `main.py`: FastAPI app, route definitions, global lock middleware
+- `backend.py`: Backend enum (LLM, EMBED, RERANK), path mappings
+- `components/openai.py`: OpenAI proxy, streaming detection
+- `components/tei.py`: TEI rerank, Hindsight shims
+- `components/embeddings.py`: Embeddings proxy
+
+All use `httpx.AsyncClient` with tuned timeouts (30s connect / 90s read for LLM, 60s/120s for TEI).
 
 ## References
 
 - [README.md](./README.md) - Full documentation
 - [test.sh](./test.sh) - Integration tests
 - [llmproxy.service](./llmproxy.service) - systemd unit file
+- [src/llmproxy/config.yaml](./src/llmproxy/config.yaml) - Backend-based lock configuration

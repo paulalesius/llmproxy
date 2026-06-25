@@ -1,5 +1,15 @@
 # Global lock configuration for llmproxy
 # Set LLMPROXY_LOCK_CONFIG env var to use a different config file
+#
+# Backend-based locking: each backend has one shared lock.
+# When an endpoint runs, all backends in its 'locks' list are locked.
+#
+# Available backends:
+#   - llm: /v1/chat/completions, /v1/completions, /v1/models, /v1/models/{id}
+#   - embeddings: /v1/embeddings
+#   - reranker: /v1/rerank, /rerank, /v1/info, /info
+#
+# You can use either backend names (recommended) or paths (auto-mapped)
 
 global_lock:
   enabled: true
@@ -8,41 +18,31 @@ global_lock:
   # If false (default), block/wait until lock is available
   locked_error: false
   
-  # Each endpoint can specify which other endpoints it locks.
-  # When an endpoint acquires its lock, all listed endpoints are blocked.
-  # Endpoints not listed here run freely in parallel.
-  
+  # LLM endpoints lock the entire LLM backend
   /v1/chat/completions:
     locks:
-      - /v1/completions
-      - /v1/embeddings
+      - llm
   
   /v1/completions:
     locks:
-      - /v1/chat/completions
-      - /v1/embeddings
+      - llm
   
+  # Embeddings endpoint locks the embeddings backend
   /v1/embeddings:
     locks:
-      - /v1/chat/completions
-      - /v1/completions
+      - embeddings
   
-  /v1/audio/transcriptions:
+  # Reranker endpoints lock the reranker backend
+  /v1/rerank:
     locks:
-      - /v1/audio/translations
-      - /v1/chat/completions
-      - /v1/completions
+      - reranker
   
-  /v1/audio/translations:
+  /rerank:
     locks:
-      - /v1/audio/transcriptions
-  
-  /v1/audio/speech:
-    locks: []
+      - reranker
   
   # Endpoints without an entry run freely:
   # - /health
   # - /info, /v1/info
   # - /v1/models
-  # - /v1/rerank, /rerank
   # - / (root)

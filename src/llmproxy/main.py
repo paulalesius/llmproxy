@@ -4,17 +4,17 @@ import os
 import logging
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from uvicorn import Config, Server
 import yaml
 from .components.tei import TEIComponent
-from .components.openai import OpenAIComponent
+from .backend import Backend, BACKEND_NAME_TO_ENUM, get_backend_for_path
 from .components.embeddings import EmbeddingsComponent
+from .components.openai import OpenAIComponent
 from .script_loader import load_script_from_path, load_shell_script, execute_lock_script
-
 from .logging_middleware import LoggingMiddleware
 
 # API key configuration
@@ -48,23 +48,39 @@ LOCK_CONFIG_PATH = os.environ.get("LLMPROXY_LOCK_CONFIG")
 LOCK_SCRIPT_PATH = os.environ.get("LLMPROXY_LOCK_SCRIPT", "")
 
 # Lock state - initialized in lifespan
+# Backend-based locking: one lock per backend, not per path
 lock_config: Optional[dict] = None
-group_locks: Dict[str, asyncio.Lock] = {}
-path_to_group: Dict[str, str] = {}
+backend_locks: Dict[Backend, asyncio.Lock] = {}
 
 # Script hooks - initialized in lifespan
 lock_script_hook: Optional[dict] = None
 
 
 def load_lock_config():
-    """Load global lock configuration from YAML file."""
-    global lock_config, group_locks, path_to_group
-
+    """Load global lock configuration from YAML file.
+    
+    Backend-based locking: each backend lists which OTHER backends to lock.
+    Example config:
+      llm:
+        locks:
+          - embed
+          - rerank
+      embed:
+        locks:
+          - llm
+          - rerank
+      rerank:
+        locks:
+          - llm
+          - embed
+    """
+    global lock_config, backend_locks
+    
     if not LOCK_CONFIG_PATH:
         logger.info("Global lock disabled (LLMPROXY_LOCK_CONFIG not set)")
         lock_config = {"enabled": False}
         return
-
+    
     if not os.path.exists(LOCK_CONFIG_PATH):
         logger.warning(f"Lock config not found at {LOCK_CONFIG_PATH}, running without locks")
         lock_config = {"enabled": False}
@@ -76,7 +92,6 @@ def load_lock_config():
         
         lock_config = config.get("global_lock")
         
-        # Default: disabled unless explicitly enabled
         if lock_config is None:
             logger.info("Global lock: no config found, disabled by default")
             lock_config = {"enabled": False}
@@ -86,37 +101,52 @@ def load_lock_config():
             logger.info("Global lock: config found but not enabled")
             return
         
-        # Each path gets its own lock
-        # When a path runs, it acquires its own lock + all locks in its 'locks' list
-        path_to_group = {}
-        group_locks = {}
+        # Create one lock per backend
+        backend_locks = {backend: asyncio.Lock() for backend in Backend}
         
-        for path, config_entry in lock_config.items():
-            if path == "enabled":
+        # Parse backend-based configuration
+        # Each backend lists which OTHER backends it should lock
+        backend_lock_mapping: dict[Backend, set[Backend]] = {}
+        
+        for backend_name, config_entry in lock_config.items():
+            if backend_name == "enabled":
                 continue
             
-            # Create a lock for this path if it doesn't exist
-            if path not in group_locks:
-                group_locks[path] = asyncio.Lock()
+            # Get Backend enum from string name
+            if backend_name not in BACKEND_NAME_TO_ENUM:
+                logger.warning(f"Unknown backend in config: {backend_name}")
+                continue
             
-            path_to_group[path] = path  # Path maps to its own lock
+            backend_enum = BACKEND_NAME_TO_ENUM[backend_name]
+            locks_to_acquire: set[Backend] = set()
             
             if isinstance(config_entry, dict):
-                locks = config_entry.get("locks", [])
-                if locks:
-                    logger.info(f"Endpoint {path} locks: {locks}")
-                else:
-                    logger.info(f"Endpoint {path} has no locks (runs freely)")
-            elif isinstance(config_entry, str):
-                locks = [config_entry]
-                logger.info(f"Endpoint {path} locks: {locks}")
+                for lock_item in config_entry.get("locks", []):
+                    if lock_item in BACKEND_NAME_TO_ENUM:
+                        locks_to_acquire.add(BACKEND_NAME_TO_ENUM[lock_item])
+                    else:
+                        logger.warning(f"Unknown lock for {backend_name}: {lock_item}")
+            
+            elif isinstance(config_entry, list):
+                for lock_item in config_entry:
+                    if lock_item in BACKEND_NAME_TO_ENUM:
+                        locks_to_acquire.add(BACKEND_NAME_TO_ENUM[lock_item])
+            
+            if locks_to_acquire:
+                backend_lock_mapping[backend_enum] = locks_to_acquire
+                lock_names = [b.value for b in locks_to_acquire]
+                logger.info(f"Backend {backend_name} locks: {lock_names}")
             else:
-                logger.info(f"Endpoint {path} has no locks (runs freely)")
+                logger.info(f"Backend {backend_name} has no locks configured")
         
-        logger.info(f"Global lock enabled with {len(group_locks)} locks")
+        # Store the mapping in lock_config for middleware to use
+        lock_config["backend_locks"] = backend_lock_mapping
+        
+        logger.info(f"Global lock enabled with {len(backend_locks)} backend locks")
         
     except Exception as e:
         logger.error(f"Failed to load lock config: {e}")
+
 
 def load_lock_script():
     """Load lock script hook (Python or shell script)."""
@@ -165,87 +195,107 @@ def load_lock_script():
 
 
 class GlobalLockMiddleware(BaseHTTPMiddleware):
-    """Middleware that applies global locks based on path configuration.
+    """Middleware that applies global locks based on backend configuration.
     
-    Each endpoint acquires its own lock + all locks listed in its config.
-    This ensures mutual exclusion between endpoints that lock each other.
+    Backend-based locking: each backend has one shared lock.
+    When a path is accessed, the backend it belongs to acquires locks
+    for all OTHER backends configured in lock_config.
     
-    If locked_error is enabled, returns 503 instead of blocking.
+    Example: if /v1/chat/completions is called:
+    1. Path belongs to LLM backend
+    2. LLM backend is configured to lock [embed, rerank]
+    3. Acquire locks for embed and rerank backends
+    4. Execute request
+    5. Release locks
     """
     
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-
-        if lock_config and lock_config.get("enabled") and path in path_to_group:
-            # Hämta bara de lås som är explicit listade i configen
-            locks_to_acquire = []
-
-            config_entry = lock_config.get(path, {})
-            if isinstance(config_entry, dict):
-                for locked_path in config_entry.get("locks", []):
-                    if locked_path in group_locks:
-                        locks_to_acquire.append(group_locks[locked_path])
-
-            # Sortera för att undvika deadlock
-            if locks_to_acquire:
-                locks_to_acquire = sorted(locks_to_acquire, key=id)
-
-            locked_error = lock_config.get("locked_error", False)
-
-            if locked_error:
-                for lock in locks_to_acquire:
-                    if lock.locked():
-                        return JSONResponse(
-                            status_code=503,
-                            content={
-                                "error": {
-                                    "message": f"Service temporarily busy, endpoint {path} is locked",
-                                    "type": "service_busy",
-                                    "retry_after": 2
-                                }
-                            }
-                        )
-                for lock in locks_to_acquire:
-                    await lock.acquire()
-            else:
-                for lock in locks_to_acquire:
-                    await lock.acquire()
-
-            try:
-                # Lock script hook (runs once during locked execution)
-                if lock_script_hook:
-                    request_data = {
-                        "method": request.method,
-                        "path": request.url.path,
-                        "url": str(request.url),
-                        "headers": dict(request.headers),
-                    }
-                    result = execute_lock_script(lock_script_hook, request_data)
-                    if not result["success"]:
-                        logger.warning(f"Lock script failed: {result['error']}")
-
-                response = await call_next(request)
+        
+        if lock_config and lock_config.get("enabled"):
+            # Get the backend for this path
+            path_backend = get_backend_for_path(path)
+            
+            if path_backend:
+                # Get which backends this backend should lock
+                backend_locks_mapping = lock_config.get("backend_locks", {})
+                locks_to_acquire_backends = backend_locks_mapping.get(path_backend, set())
                 
-                # Post-response hook (if Python with handle_request that accepts response_status)
-                if lock_script_hook and lock_script_hook.get("type") == "python":
-                    request_data = {
-                        "method": request.method,
-                        "path": request.url.path,
-                        "url": str(request.url),
-                        "headers": dict(request.headers),
-                        "response_status": response.status_code,
-                        "phase": "post",
-                    }
-                    result = execute_lock_script(lock_script_hook, request_data)
-                    if not result["success"]:
-                        logger.warning(f"Lock script (post) failed: {result['error']}")
-
-                return response
-            finally:
-                for lock in reversed(locks_to_acquire):
-                    lock.release()
-
+                if locks_to_acquire_backends:
+                    # Convert to actual lock objects
+                    locks_to_acquire = []
+                    for lock_backend in sorted(locks_to_acquire_backends, key=lambda b: b.value):
+                        if lock_backend in backend_locks:
+                            locks_to_acquire.append(backend_locks[lock_backend])
+                    
+                    if locks_to_acquire:
+                        logger.info(f"[GlobalLock] {path} ({path_backend.value}) acquiring locks for: {[b.value for b in locks_to_acquire_backends]}")
+                        
+                        locked_error = lock_config.get("locked_error", False)
+                        
+                        if locked_error:
+                            # Check if any lock is already held
+                            for lock in locks_to_acquire:
+                                if lock.locked():
+                                    return JSONResponse(
+                                        status_code=503,
+                                        content={
+                                            "error": {
+                                                "message": f"Service temporarily busy, {path_backend.value} backend is locked",
+                                                "type": "service_busy",
+                                                "retry_after": 2
+                                            }
+                                        }
+                                    )
+                            for lock in locks_to_acquire:
+                                await lock.acquire()
+                        else:
+                            # Block until all locks are acquired
+                            for lock in locks_to_acquire:
+                                await lock.acquire()
+                        
+                        try:
+                            # Lock script hook (runs once during locked execution)
+                            if lock_script_hook:
+                                request_data = {
+                                    "method": request.method,
+                                    "path": request.url.path,
+                                    "url": str(request.url),
+                                    "headers": dict(request.headers),
+                                }
+                                result = execute_lock_script(lock_script_hook, request_data)
+                                if not result["success"]:
+                                    logger.warning(f"Lock script failed: {result['error']}")
+                            
+                            response = await call_next(request)
+                            
+                            # Post-response hook (if Python with handle_request that accepts response_status)
+                            if lock_script_hook and lock_script_hook.get("type") == "python":
+                                request_data = {
+                                    "method": request.method,
+                                    "path": request.url.path,
+                                    "url": str(request.url),
+                                    "headers": dict(request.headers),
+                                    "response_status": response.status_code,
+                                }
+                                if lock_script_hook.get("handle_request"):
+                                    result = execute_lock_script(lock_script_hook, request_data)
+                                    if not result["success"]:
+                                        logger.warning(f"Lock script post-response failed: {result['error']}")
+                            
+                            return response
+                            
+                        finally:
+                            # Release locks in reverse order
+                            for lock in reversed(locks_to_acquire):
+                                lock.release()
+            
+            # No locks configured for this path/backend
+            return await call_next(request)
+        
+        # Global lock disabled
         return await call_next(request)
+
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
     """Middleware to check API key when enabled.
@@ -349,8 +399,6 @@ async def info():
                 "max_concurrent_requests": 8,
                 "max_client_batch_size": 128,
                 "max_chunks_per_doc": 128,
-                "query_max_tokens": 4096,
-                "document_max_tokens": 8192,
                 "num_queries": 1024,
                 "num_pairs": 1024,
                 "num_passages": 1024,
@@ -434,19 +482,13 @@ async def openai_completions(request: dict):
 
 @app.post("/v1/embeddings")
 async def openai_embeddings(request: dict):
-    """OpenAI-compatible: embeddings (uses dedicated embeddings server)."""
-    data, status = await app.state.embeddings.embeddings(request, return_response=True)
-    return JSONResponse(content=data, status_code=int(status))
-
-def main():
-    """Run the proxy server."""
-    host = os.environ.get("LLMPROXY_HOST", "127.0.0.1")
-    port = int(os.environ.get("LLMPROXY_PORT", "8000"))
-
-    config = Config(app=app, host=host, port=port, log_level=log_level)
-    server = Server(config=config)
-    server.run()
+    """OpenAI-compatible: embeddings endpoint."""
+    result, status = await app.state.embeddings.embeddings(request, return_response=True)
+    return JSONResponse(content=result, status_code=int(status))
 
 
 if __name__ == "__main__":
-    main()
+    import uvicorn
+    
+    port = int(os.environ.get("LLMPROXY_PORT", 4001))
+    uvicorn.run(app, host="0.0.0.0", port=port)
