@@ -142,6 +142,11 @@ def execute_lock_script(hook: dict, request_data: dict = None) -> dict:
           - LOCK_SCRIPT_RESPONSE_STATUS (post phase only)
           - LOCK_SCRIPT_PHASE (pre/post)
     
+    For bash commands:
+        - Exports request data as environment variables
+        - Runs command via subprocess with shell=True
+        - Same environment variables as shell scripts
+    
     Returns execution result:
         - success: bool
         - result: return value or stdout (if any)
@@ -177,13 +182,15 @@ def execute_lock_script(hook: dict, request_data: dict = None) -> dict:
             }
         
         elif hook.get("type") == "shell":
-            # Shell script execution
+            # Shell script or bash command execution
             script_path = hook.get("path")
-            if not script_path:
+            command = hook.get("command")
+            
+            if not script_path and not command:
                 return {
                     "success": False,
                     "result": None,
-                    "error": "Shell script path not found"
+                    "error": "Shell script path or command not found"
                 }
             
             # Build environment
@@ -201,14 +208,26 @@ def execute_lock_script(hook: dict, request_data: dict = None) -> dict:
                 else:
                     env["LOCK_SCRIPT_PHASE"] = "pre"
             
-            # Run script
-            result = subprocess.run(
-                [script_path],
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
+            # Run script or command
+            if command:
+                # Bash command (shell=True)
+                result = subprocess.run(
+                    command,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    shell=True
+                )
+            else:
+                # Shell script (shell=False)
+                result = subprocess.run(
+                    [script_path],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
             
             stdout = result.stdout.strip() if result.stdout else None
             stderr = result.stderr.strip() if result.stderr else None
@@ -223,7 +242,7 @@ def execute_lock_script(hook: dict, request_data: dict = None) -> dict:
                 return {
                     "success": False,
                     "result": stdout,
-                    "error": f"Shell script exited with code {result.returncode}: {stderr}"
+                    "error": f"Shell script/command exited with code {result.returncode}: {stderr}"
                 }
         
         else:
@@ -245,3 +264,61 @@ def execute_lock_script(hook: dict, request_data: dict = None) -> dict:
             "result": None,
             "error": f"Script execution failed: {str(e)}"
         }
+
+
+def load_lock_script(script_path: str) -> dict:
+    """Load lock script from path or bash command.
+    
+    Supports three modes:
+    1. Python script (.py) - loads as module with handle_request()
+    2. Shell script (.sh, .bash) - loads as executable script
+    3. Bash command - raw command string (if not a file)
+    
+    Returns a dict with:
+        - type: "python", "shell", or "command"
+        - module: loaded Python module (if type="python")
+        - handle_request: callable (if type="python" and module exports it)
+        - path: absolute path to script (if type="shell" or "python")
+        - command: command string (if type="command")
+        - executable: bool (if type="shell")
+        - error: error message if loading failed
+    """
+    if not script_path:
+        return {
+            "type": "unknown",
+            "module": None,
+            "handle_request": None,
+            "path": None,
+            "command": None,
+            "executable": False,
+            "error": "No script path specified"
+        }
+    
+    # Check if it's a file path
+    if os.path.isfile(script_path):
+        # Determine script type by extension
+        _, ext = os.path.splitext(script_path)
+        ext = ext.lower()
+        
+        if ext in ('.py',):
+            # Python script
+            return load_script_from_path(script_path)
+        
+        elif ext in ('.sh', '.bash',):
+            # Shell script
+            return load_shell_script(script_path)
+        
+        else:
+            # Unknown extension, treat as shell script
+            return load_shell_script(script_path)
+    
+    # Not a file - treat as bash command
+    return {
+        "type": "command",
+        "module": None,
+        "handle_request": None,
+        "path": None,
+        "command": script_path,
+        "executable": True,
+        "error": None
+    }

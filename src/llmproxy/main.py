@@ -14,7 +14,7 @@ from .components.tei import TEIComponent
 from .backend import Backend, BACKEND_NAME_TO_ENUM, get_backend_for_path
 from .components.embeddings import EmbeddingsComponent
 from .components.openai import OpenAIComponent
-from .script_loader import load_script_from_path, load_shell_script, execute_lock_script
+from .script_loader import load_lock_script, execute_lock_script
 from .logging_middleware import LoggingMiddleware
 
 # API key configuration
@@ -44,7 +44,10 @@ logger = logging.getLogger(__name__)
 LOCK_CONFIG_PATH = os.environ.get("LLMPROXY_LOCK_CONFIG")
 
 # Lock script - single script that runs during locked request execution
-# Can be either a Python script (.py) or shell script (.sh, .bash)
+# Can be:
+#   1. Python script (.py) - loads as module with handle_request()
+#   2. Shell script (.sh, .bash) - loads as executable script
+#   3. Bash command - raw command string (if not a file)
 LOCK_SCRIPT_PATH = os.environ.get("LLMPROXY_LOCK_SCRIPT", "")
 
 # Lock state - initialized in lifespan
@@ -154,7 +157,7 @@ def load_lock_config():
 
 
 def load_lock_script():
-    """Load lock script hook (Python or shell script)."""
+    """Load lock script hook (Python, shell script, or bash command)."""
     global lock_script_hook
     
     if not LOCK_SCRIPT_PATH:
@@ -162,41 +165,24 @@ def load_lock_script():
         logger.info("Lock script disabled (LLMPROXY_LOCK_SCRIPT not set)")
         return
     
-    if not os.path.exists(LOCK_SCRIPT_PATH):
-        lock_script_hook = None
-        logger.warning(f"Lock script not found at {LOCK_SCRIPT_PATH}")
-        return
+    # Use the new load_lock_script() function that handles all three modes
+    hook = load_lock_script(LOCK_SCRIPT_PATH)
+    lock_script_hook = hook
     
-    # Determine script type by extension
-    _, ext = os.path.splitext(LOCK_SCRIPT_PATH)
-    ext = ext.lower()
-    
-    if ext in ('.py',):
-        # Python script
-        hook = load_script_from_path(LOCK_SCRIPT_PATH)
-        if hook["error"]:
-            logger.warning(f"Lock script (Python): {hook['error']}")
-        else:
+    if hook["error"]:
+        logger.warning(f"Lock script: {hook['error']}")
+    else:
+        if hook["type"] == "python":
             logger.info(f"Lock script loaded (Python): {LOCK_SCRIPT_PATH}")
             if hook["handle_request"]:
                 logger.info("  - has handle_request() function")
             else:
                 logger.info("  - runs as plain script on import")
-        lock_script_hook = hook
-    
-    elif ext in ('.sh', '.bash',):
-        # Shell script
-        hook = load_shell_script(LOCK_SCRIPT_PATH)
-        if hook["error"]:
-            logger.warning(f"Lock script (shell): {hook['error']}")
-        else:
-            logger.info(f"Lock script loaded (shell): {LOCK_SCRIPT_PATH}")
+        elif hook["type"] == "shell":
+            logger.info(f"Lock script loaded (shell): {hook['path']}")
             logger.info(f"  - executable: {hook['executable']}")
-        lock_script_hook = hook
-    
-    else:
-        lock_script_hook = None
-        logger.warning(f"Unknown script type: {ext}, expected .py, .sh, or .bash")
+        elif hook["type"] == "command":
+            logger.info(f"Lock script loaded (bash command): {hook['command']}")
 
 
 class GlobalLockMiddleware(BaseHTTPMiddleware):
