@@ -14,9 +14,9 @@ Environment=LLMPROXY_LLM_API_KEY=
 Environment=LLMPROXY_LLM_TIMEOUT=30
 
 # Reranker server (TEI rerank)
-Environment=LLMPROXY_TEIRERANKER_BASE_URL=http://127.0.0.1:8082
-Environment=LLMPROXY_TEIRERANKER_API_KEY=
-Environment=LLMPROXY_TEIRERANKER_TIMEOUT=30
+Environment=LLMPROXY_RERANK_BASE_URL=http://127.0.0.1:8082
+Environment=LLMPROXY_RERANK_API_KEY=
+Environment=LLMPROXY_RERANK_TIMEOUT=30
 
 # Embeddings server (dedicated embeddings instance)
 Environment=LLMPROXY_EMBED_BASE_URL=http://127.0.0.1:8081

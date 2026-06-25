@@ -80,7 +80,7 @@ uv sync
 
 export LLMPROXY_LLM_BASE_URL=http://127.0.0.1:8080
 export LLMPROXY_EMBED_BASE_URL=http://127.0.0.1:8081
-export LLMPROXY_TEIRERANKER_BASE_URL=http://127.0.0.1:8082
+export LLMPROXY_RERANK_BASE_URL=http://127.0.0.1:8082
 export LLMPROXY_PORT=8000
 
 uv run python -m src.llmproxy.main
@@ -94,7 +94,7 @@ uv run python -m src.llmproxy.main
 |---------------------------------------|--------------------------------------------------|-----------------------------|
 | `LLMPROXY_LLM_BASE_URL`            | Main LLM server (chat/completions/models)        | `http://127.0.0.1:8080`     |
 | `LLMPROXY_EMBED_BASE_URL`     | Dedicated embeddings server                      | `http://127.0.0.1:8081`     |
-| `LLMPROXY_TEIRERANKER_BASE_URL`       | Reranker / TEI server                            | `http://127.0.0.1:8082`     |
+| `LLMPROXY_RERANK_BASE_URL`       | Reranker / TEI server                            | `http://127.0.0.1:8082`     |
 
 ### Optional but Recommended
 
@@ -113,8 +113,8 @@ uv run python -m src.llmproxy.main
 |---------------------------------------|--------------------------------------------------|---------|
 | `LLMPROXY_LLM_TIMEOUT`             | Connection timeout for LLM backend               | `30`    |
 | `LLMPROXY_LLM_READ_TIMEOUT`        | Read timeout for LLM backend (streaming +210s)   | `90`    |
-| `LLMPROXY_TEIRERANKER_TIMEOUT`        | Connection timeout for reranker backend          | `60`    |
-| `LLMPROXY_TEIRERANKER_READ_TIMEOUT`   | Read timeout for reranker backend                | `120`   |
+| `LLMPROXY_RERANK_TIMEOUT`        | Connection timeout for reranker backend          | `60`    |
+| `LLMPROXY_RERANK_READ_TIMEOUT`   | Read timeout for reranker backend                | `120`   |
 | `LLMPROXY_EMBED_TIMEOUT`      | Connection timeout for embeddings backend        | `30`    |
 | `LLMPROXY_EMBED_READ_TIMEOUT` | Read timeout for embeddings backend              | `60`    |
 

@@ -25,7 +25,7 @@ cd /src/llmproxy
 
 # Set environment variables
 export LLMPROXY_LLM_BASE_URL=http://127.0.0.1:8080
-export LLMPROXY_TEIRERANKER_BASE_URL=http://127.0.0.1:8082
+export LLMPROXY_RERANK_BASE_URL=http://127.0.0.1:8082
 export LLMPROXY_PORT=4001
 
 # Start the proxy
@@ -38,8 +38,8 @@ uv run python -m src.llmproxy.main
 |----------|---------|----------|-------------|
 | `LLMPROXY_LLM_BASE_URL` | `http://127.0.0.1:8080` | Yes | LLM llama-server URL |
 | `LLMPROXY_LLM_API_KEY` | `` | No | API key for LLM backend |
-| `LLMPROXY_TEIRERANKER_BASE_URL` | `http://127.0.0.1:8082` | Yes | Reranker llama-server URL |
-| `LLMPROXY_TEIRERANKER_API_KEY` | `` | No | API key for reranker backend |
+| `LLMPROXY_RERANK_BASE_URL` | `http://127.0.0.1:8082` | Yes | Reranker llama-server URL |
+| `LLMPROXY_RERANK_API_KEY` | `` | No | API key for reranker backend |
 | `LLMPROXY_HOST` | `0.0.0.0` | No | Listen address |
 | `LLMPROXY_PORT` | `4001` | No | Listen port |
 | `LLMPROXY_LOG_LEVEL` | `info` | No | Log level: `info`, `debug`, `trace` |
@@ -59,8 +59,8 @@ The project includes `llmproxy.service` for systemd deployment:
 [Service]
 Environment="LLMPROXY_LLM_BASE_URL=http://127.0.0.1:8080"
 Environment="LLMPROXY_LLM_API_KEY="
-Environment="LLMPROXY_TEIRERANKER_BASE_URL=http://127.0.0.1:8082"
-Environment="LLMPROXY_TEIRERANKER_API_KEY="
+Environment="LLMPROXY_RERANK_BASE_URL=http://127.0.0.1:8082"
+Environment="LLMPROXY_RERANK_API_KEY="
 Environment="LLMPROXY_HOST=0.0.0.0"
 Environment="LLMPROXY_PORT=4001"
 ```
