@@ -1,25 +1,16 @@
-"""FastAPI application factory."""
+"""FastAPI application factory - Clean working version."""
 
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
-from .config import get_config
-from .endpoints import (
-    chat_router,
-    embeddings_router,
-    models_router,
-    rerank_router,
-)
-from .middleware import (
-    APIKeyMiddleware,
-    GlobalLockMiddleware,
-    LoggingMiddleware,
-)
-from .components.tei import TEIComponent
+from .config import get_config, reload_config
 from .components.openai import OpenAIComponent
+from .components.tei import TEIComponent
 from .components.embeddings import EmbeddingsComponent
+from .middleware import LoggingMiddleware, APIKeyMiddleware, GlobalLockMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -29,30 +20,27 @@ async def lifespan(app: FastAPI):
     config = get_config()
     logger.info("Starting LLM Proxy components...")
 
-    app.state.tei = TEIComponent()
     app.state.openai = OpenAIComponent()
+    app.state.tei = TEIComponent()
     app.state.embeddings = EmbeddingsComponent()
 
-    logger.info("All components initialized successfully")
+    logger.info("All components initialized")
     yield
 
     logger.info("Shutting down components...")
-    await app.state.tei.close()
     await app.state.openai.close()
+    await app.state.tei.close()
     await app.state.embeddings.close()
 
 
 def create_app(config_path: str | None = None) -> FastAPI:
-    """Create and configure the FastAPI application."""
     if config_path:
-        from .config import reload_config
         reload_config(config_path)
 
     config = get_config()
 
     app = FastAPI(
         title="LLM Proxy",
-        description="Unified proxy for LLM, embeddings and rerank backends",
         version="0.3.0",
         lifespan=lifespan,
     )
@@ -64,10 +52,54 @@ def create_app(config_path: str | None = None) -> FastAPI:
     if config.lock.enabled:
         app.add_middleware(GlobalLockMiddleware)
 
-    app.include_router(chat_router)
-    app.include_router(embeddings_router)
-    app.include_router(models_router)
-    app.include_router(rerank_router)
+    # ==================== ROUTES USING MODERN COMPONENTS ====================
+
+    @app.post("/v1/chat/completions")
+    async def chat_completions(request: Request):
+        body = await request.json()
+        result = await app.state.openai.chat_completions(body)
+
+        if isinstance(result, tuple):
+            data, status = result
+            # Streaming case: component already returns a StreamingResponse
+            if isinstance(data, StreamingResponse):
+                return data
+            return JSONResponse(content=data, status_code=status)
+
+        return result
+
+
+    @app.post("/v1/completions")
+    async def completions(request: Request):
+        body = await request.json()
+        result = await app.state.openai.completions(body)
+
+        if isinstance(result, tuple):
+            data, status = result
+            if isinstance(data, StreamingResponse):
+                return data
+            return JSONResponse(content=data, status_code=status)
+
+        return result
+
+    @app.post("/v1/embeddings")
+    async def embeddings(request: Request):
+        body = await request.json()
+        data, status = await app.state.embeddings.embeddings(body, return_response=True)
+        return JSONResponse(content=data, status_code=status)
+
+    @app.post("/v1/rerank")
+    async def rerank(request: Request):
+        from .components.tei import RerankRequest
+        body = await request.json()
+        req = RerankRequest(**body)
+        result = await app.state.tei.rerank(req)
+        return result
+
+    @app.get("/v1/models")
+    async def list_models():
+        data, status = await app.state.openai.models()
+        return JSONResponse(content=data, status_code=status)
 
     @app.get("/")
     async def root():
@@ -78,8 +110,3 @@ def create_app(config_path: str | None = None) -> FastAPI:
         return {"status": "healthy"}
 
     return app
-
-
-# Do NOT create the app at import time.
-# The app should only be created in main.py after the config is loaded.
-# app = create_app()
