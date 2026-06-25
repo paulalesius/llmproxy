@@ -15,6 +15,8 @@ from .components.openai import OpenAIComponent
 from .components.embeddings import EmbeddingsComponent
 from .script_loader import load_script_from_path, execute_hook
 
+from .logging_middleware import LoggingMiddleware
+
 # API key configuration
 # API key protection is enabled when LLMPROXY_API_KEY is set
 LLMPROXY_PORT = os.environ.get("LLMPROXY_PORT")
@@ -163,132 +165,76 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
     
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        
-        # Check if this path has lock configuration
+
         if lock_config and lock_config.get("enabled") and path in path_to_group:
-            # Get the locks this path needs to acquire
-            locks_to_acquire = [group_locks[path]]  # Always acquire own lock
-            
-            # Add locks from config
+            # Hämta bara de lås som är explicit listade i configen
+            locks_to_acquire = []
+
             config_entry = lock_config.get(path, {})
             if isinstance(config_entry, dict):
                 for locked_path in config_entry.get("locks", []):
                     if locked_path in group_locks:
                         locks_to_acquire.append(group_locks[locked_path])
-            
-            # Sort by lock id to ensure consistent ordering (avoid deadlock)
-            locks_to_acquire = sorted(locks_to_acquire, key=id)
-            
-            # Check if locked_error mode is enabled
+
+            # Sortera för att undvika deadlock
+            if locks_to_acquire:
+                locks_to_acquire = sorted(locks_to_acquire, key=id)
+
             locked_error = lock_config.get("locked_error", False)
-            
+
             if locked_error:
-                # Check if all locks are available (non-blocking)
                 for lock in locks_to_acquire:
                     if lock.locked():
-                        logger.debug(f"[{request.method} {path}] Lock busy, returning 503")
                         return JSONResponse(
                             status_code=503,
                             content={
                                 "error": {
                                     "message": f"Service temporarily busy, endpoint {path} is locked",
                                     "type": "service_busy",
-                                    "retry_after": 2  # seconds
+                                    "retry_after": 2
                                 }
                             }
                         )
-                
-                # All locks available, acquire them
-                logger.debug(f"[{request.method} {path}] All locks available, acquiring {len(locks_to_acquire)}")
                 for lock in locks_to_acquire:
                     await lock.acquire()
-                
-                try:
-                    # Run pre-script hook (after lock acquired, before request)
-                    if pre_script_hook:
-                        request_data = {
-                            "method": request.method,
-                            "path": request.url.path,
-                            "url": str(request.url),
-                            "headers": dict(request.headers),
-                        }
-                        result = execute_hook(pre_script_hook, request_data)
-                        if not result["success"]:
-                            logger.warning(f"Pre-script hook failed: {result['error']}")
-                        elif result["result"] is not None:
-                            logger.debug(f"Pre-script hook returned: {result['result']}")
-                    
-                    response = await call_next(request)
-                    
-                    # Run post-script hook (after request, before lock release)
-                    if post_script_hook:
-                        request_data = {
-                            "method": request.method,
-                            "path": request.url.path,
-                            "url": str(request.url),
-                            "headers": dict(request.headers),
-                            "response_status": response.status_code,
-                        }
-                        result = execute_hook(post_script_hook, request_data)
-                        if not result["success"]:
-                            logger.warning(f"Post-script hook failed: {result['error']}")
-                        elif result["result"] is not None:
-                            logger.debug(f"Post-script hook returned: {result['result']}")
-                    
-                    return response
-                finally:
-                    # Release all locks in reverse order
-                    for lock in reversed(locks_to_acquire):
-                        lock.release()
             else:
-                # Blocking mode - wait for all locks
-                if len(locks_to_acquire) > 1:
-                    logger.debug(f"[{request.method} {path}] Acquiring {len(locks_to_acquire)} locks (blocking)")
-                
                 for lock in locks_to_acquire:
                     await lock.acquire()
-                
-                try:
-                    # Run pre-script hook (after lock acquired, before request)
-                    if pre_script_hook:
-                        request_data = {
-                            "method": request.method,
-                            "path": request.url.path,
-                            "url": str(request.url),
-                            "headers": dict(request.headers),
-                        }
-                        result = execute_hook(pre_script_hook, request_data)
-                        if not result["success"]:
-                            logger.warning(f"Pre-script hook failed: {result['error']}")
-                        elif result["result"] is not None:
-                            logger.debug(f"Pre-script hook returned: {result['result']}")
-                    
-                    response = await call_next(request)
-                    
-                    # Run post-script hook (after request, before lock release)
-                    if post_script_hook:
-                        request_data = {
-                            "method": request.method,
-                            "path": request.url.path,
-                            "url": str(request.url),
-                            "headers": dict(request.headers),
-                            "response_status": response.status_code,
-                        }
-                        result = execute_hook(post_script_hook, request_data)
-                        if not result["success"]:
-                            logger.warning(f"Post-script hook failed: {result['error']}")
-                        elif result["result"] is not None:
-                            logger.debug(f"Post-script hook returned: {result['result']}")
-                    
-                    return response
-                finally:
-                    # Release all locks in reverse order
-                    for lock in reversed(locks_to_acquire):
-                        lock.release()
-        
-        # No lock needed, process freely
-        return await call_next(request)
 
+            try:
+                # Pre-hook
+                if pre_script_hook:
+                    request_data = {
+                        "method": request.method,
+                        "path": request.url.path,
+                        "url": str(request.url),
+                        "headers": dict(request.headers),
+                    }
+                    result = execute_hook(pre_script_hook, request_data)
+                    if not result["success"]:
+                        logger.warning(f"Pre-script hook failed: {result['error']}")
+
+                response = await call_next(request)
+
+                # Post-hook
+                if post_script_hook:
+                    request_data = {
+                        "method": request.method,
+                        "path": request.url.path,
+                        "url": str(request.url),
+                        "headers": dict(request.headers),
+                        "response_status": response.status_code,
+                    }
+                    result = execute_hook(post_script_hook, request_data)
+                    if not result["success"]:
+                        logger.warning(f"Post-script hook failed: {result['error']}")
+
+                return response
+            finally:
+                for lock in reversed(locks_to_acquire):
+                    lock.release()
+
+        return await call_next(request)
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
     """Middleware to check API key when enabled.
@@ -357,6 +303,7 @@ app = FastAPI(
 # Add middleware in order: GlobalLock first, then APIKey
 app.add_middleware(GlobalLockMiddleware)
 app.add_middleware(APIKeyMiddleware)
+app.add_middleware(LoggingMiddleware)
 
 
 # No need for on_event decorators anymore
@@ -485,7 +432,7 @@ def main():
     host = os.environ.get("LLMPROXY_HOST", "127.0.0.1")
     port = int(os.environ.get("LLMPROXY_PORT", "8000"))
 
-    config = Config(app=app, host=host, port=port, log_level="info")
+    config = Config(app=app, host=host, port=port, log_level=log_level)
     server = Server(config=config)
     server.run()
 

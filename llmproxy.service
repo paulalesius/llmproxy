@@ -1,6 +1,6 @@
 [Unit]
 Description=LLM Proxy - TEI-compatible rerank and OpenAI-compatible LLM/embeddings proxy
-After=network.target
+After=network.target llama-server.service llama-reranker.service llama-embeddings.service
 
 [Service]
 Type=simple
@@ -23,13 +23,20 @@ Environment="LLMPROXY_OAIEMBEDDINGS_API_KEY="
 # Proxy configuration
 Environment=LLMPROXY_HOST=0.0.0.0
 Environment=LLMPROXY_PORT=4001
-Environment=LLMPROXY_LOG_LEVEL=debug
 Environment=LLMPROXY_API_KEY=
+Environment=LLMPROXY_LOG_LEVEL=debug
+
+# Lock configuration (optional)
+Environment=LLMPROXY_LOCK_CONFIG=/etc/llmproxy/config.yaml
+
+Environment=LLMPROXY_REQUEST_PRE_PYSCRIPT=/etc/llmproxy/hook.py
+Environment=LLMPROXY_REQUEST_POST_PYSCRIPT=/etc/llmproxy/hook.py
 
 # Setup and start
 ExecStartPre=/home/noname/.local/bin/uv sync
 ExecStart=/src/llmproxy/.venv/bin/python -m src.llmproxy.main
 Restart=on-failure
+TimeoutStopSec=90s
 RestartSec=5
 
 [Install]
