@@ -15,6 +15,7 @@ This allows gradual migration; new deployments should use config.yaml exclusivel
 """
 
 import os
+import logging
 from typing import Optional, Any
 from dataclasses import dataclass, field
 import yaml
@@ -122,7 +123,13 @@ def _load_from_yaml(path: str, config: Config) -> None:
     if "backends" in data:
         backends_data = data["backends"]
 
-        # Store raw backends data for defaults (like backends.lock_script)
+        # Extract default lock_script at backends level (applies to all backends)
+        backends_default_lock_script = backends_data.get("lock_script", "")
+        if backends_default_lock_script:
+            config.backends_default_lock_script = backends_default_lock_script
+            logger.debug(f"Default backends.lock_script configured: {backends_default_lock_script}")
+
+        # Store raw backends data for fallback (legacy support for global_lock.lock_script)
         config.backends_raw = backends_data
 
         # Backend configurations

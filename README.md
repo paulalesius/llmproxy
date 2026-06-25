@@ -193,14 +193,18 @@ server:
 global_lock:
   enabled: true
   locked_error: false
-  lock_script: ""
 
 backends:
+  # Default lock_script for all backends (can be overridden per-backend)
+  lock_script: ""
+  
   llm:
     base_url: http://127.0.0.1:8080
     locks:
       - embed
       - rerank
+    # Can override default lock_script or set its own
+    # lock_script: "/path/to/llm-specific-lock.sh"
   embed:
     base_url: http://127.0.0.1:8081
     locks:
@@ -226,7 +230,9 @@ backends:
 - **`global_lock` section is optional** — omit it entirely to disable locking
 - **`enabled: true`** — if section exists but `enabled: false`, locking is disabled
 - **`locked_error: false`** — if `true`, returns 503 immediately when lock is held; if `false`, blocks until lock acquired
-- **`lock_script: ""`** — optional Python/shell/bash command to run during locked execution
+- **`backends.lock_script: ""`** — optional default Python/shell/bash command for all backends (set at `backends:` level)
+- **Per-backend `lock_script`** — override the default for a specific backend (set at `backends.llm.lock_script`, etc.)
+- **Lock script priority**: per-backend `lock_script` > `backends.lock_script` > `global_lock.lock_script` (legacy)
 
 **Legacy path-based locking** (older format, still supported):
 
