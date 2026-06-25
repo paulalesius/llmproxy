@@ -154,10 +154,6 @@ class OpenAIComponent:
                 _log_request(log_level, "/v1/chat/completions", "POST", body)
         
         if is_stream:
-            logger.info(f"chat_completions streaming request for model={body.get('model')}")
-            if log_level == "trace":
-                _log_request("trace", "/v1/chat/completions", "POST", body)
-
             try:
                 resp = await self.client.post(
                     "/v1/chat/completions",
@@ -253,12 +249,6 @@ class OpenAIComponent:
                 return body_result, status
             return body_result
 
-    async def embeddings(self, body: dict, return_response: bool = False):
-        """POST /v1/embeddings."""
-        body_result, status = await self._forward_with_status("POST", "/v1/embeddings", json=body)
-        if return_response:
-            return body_result, status
-        return body_result
 
     async def close(self):
         await self.client.aclose()

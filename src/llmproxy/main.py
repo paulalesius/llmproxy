@@ -15,10 +15,10 @@ from .components.openai import OpenAIComponent
 from .components.embeddings import EmbeddingsComponent
 
 # API key configuration
-# API key protection is enabled when LLMPROXY_PORT is set
+# API key protection is enabled when LLMPROXY_API_KEY is set
 LLMPROXY_PORT = os.environ.get("LLMPROXY_PORT")
 LLMPROXY_API_KEY = os.environ.get("LLMPROXY_API_KEY", "").strip()
-API_KEY_ENABLED = bool(LLMPROXY_API_KEY)
+API_KEY_ENABLED = bool(LLMPROXY_API_KEY)  # Enabled when API key is set
 
 # Configure logging level from environment
 log_level = os.environ.get("LLMPROXY_LOG_LEVEL", "info").lower()

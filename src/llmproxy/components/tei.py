@@ -182,9 +182,18 @@ class TEIComponent:
             
             llama_response = response.json()
             
+            # Handle both dict {"results": [...]} and raw list [...] responses
+            if isinstance(llama_response, list):
+                # Raw list response (some llama-server builds return this)
+                results_raw = llama_response
+            elif isinstance(llama_response, dict):
+                # Dict response with "results" key
+                results_raw = llama_response.get("results", [])
+            else:
+                logger.warning(f"Unexpected rerank response type: {type(llama_response)}")
+                results_raw = []
+            
             # Transform llama-server response to TEI format
-            results = []
-            for i, item in enumerate(llama_response.get("results", [])):
                 # Preserve original index from backend (TEI spec: maps back to input documents)
                 # Fallback to enumerate position only if backend doesn't provide it
                 original_index = item.get("index", i)
