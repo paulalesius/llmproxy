@@ -160,7 +160,7 @@ uv run python -m src.llmproxy.main
 | `LLMPROXY_HOST`                 | Listen address                                                              | `0.0.0.0`   |
 | `LLMPROXY_LOG_LEVEL`            | `info` / `debug` / `trace`                                                  | `info`      |
 | `LLMPROXY_API_KEY`              | Enable API key protection on OpenAI endpoints when set                      | —           |
-| `LLMPROXY_LOCK_CONFIG`          | Path to `config.yaml` for global locks                                      | —           |
+| `LLMPROXY_CONFIG`               | Path to `config.yaml` for global locks and main configuration               | —           |
 | `LLMPROXY_LOCK_SCRIPT`          | Python (.py) / Shell (.sh/.bash) / Bash command executed during locked requests | —           |
 
 ### Backend Timeouts (in seconds)

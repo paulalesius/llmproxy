@@ -31,7 +31,7 @@ Environment=LLMPROXY_LOG_LEVEL=debug
 Environment=LLMPROXY_LOCK_SCRIPT=/etc/llmproxy/hook.py
 
 # Lock configuration (optional)
-Environment=LLMPROXY_LOCK_CONFIG=/etc/llmproxy/config.yaml
+Environment=LLMPROXY_CONFIG=/etc/llmproxy/config.yaml
 
 # Setup and start
 ExecStartPre=/home/noname/.local/bin/uv sync

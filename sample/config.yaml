@@ -1,6 +1,8 @@
 # Global lock configuration for llmproxy
-# Set LLMPROXY_LOCK_CONFIG env var to use a different config file
+# Set LLMPROXY_CONFIG env var to use a different config file
 #
+# This is the main configuration file for LLMProxy.
+# Currently contains global_lock settings, but can be extended with other configuration.
 # Backend-based locking: each backend has one shared lock.
 # When an endpoint runs, all backends in its 'locks' list are locked.
 #

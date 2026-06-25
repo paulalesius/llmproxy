@@ -39,9 +39,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Global lock configuration
-# Only enabled if LLMPROXY_LOCK_CONFIG env var is explicitly set
-# If not set, runs without any locks (disabled by default)
-LOCK_CONFIG_PATH = os.environ.get("LLMPROXY_LOCK_CONFIG")
+# Disabled by default unless explicitly enabled via global_lock.enabled in config file
+# Set global_lock.enabled: true in your config to enable request serialization
+LOCK_CONFIG_PATH = os.environ.get("LLMPROXY_CONFIG")
 
 # Lock script - single script that runs during locked request execution
 # Can be:
@@ -80,7 +80,7 @@ def load_lock_config():
     global lock_config, backend_locks
     
     if not LOCK_CONFIG_PATH:
-        logger.info("Global lock disabled (LLMPROXY_LOCK_CONFIG not set)")
+        logger.info("Global lock disabled (LLMPROXY_CONFIG not set)")
         lock_config = {"enabled": False}
         return
     
