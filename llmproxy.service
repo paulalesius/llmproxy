@@ -11,34 +11,27 @@ WorkingDirectory=/src/llmproxy
 # LLM server (chat/completions/models)
 Environment="LLMPROXY_OAILLM_BASE_URL=http://127.0.0.1:8080"
 Environment="LLMPROXY_OAILLM_API_KEY="
+Environment=LLMPROXY_OAILLM_TIMEOUT=30
 
 # Reranker server (TEI rerank)
 Environment="LLMPROXY_TEIRERANKER_BASE_URL=http://127.0.0.1:8082"
 Environment="LLMPROXY_TEIRERANKER_API_KEY="
+Environment=LLMPROXY_TEIRERANKER_TIMEOUT=30
 
 # Embeddings server (dedicated embeddings instance)
 Environment="LLMPROXY_OAIEMBEDDINGS_BASE_URL=http://127.0.0.1:8081"
 Environment="LLMPROXY_OAIEMBEDDINGS_API_KEY="
+Environment=LLMPROXY_OAIEMBEDDINGS_TIMEOUT=30
 
 # Proxy configuration
 Environment=LLMPROXY_HOST=0.0.0.0
 Environment=LLMPROXY_PORT=4001
 Environment=LLMPROXY_API_KEY=
 Environment=LLMPROXY_LOG_LEVEL=debug
+Environment=LLMPROXY_LOCK_SCRIPT=/etc/llmproxy/hook.py
 
 # Lock configuration (optional)
 Environment=LLMPROXY_LOCK_CONFIG=/etc/llmproxy/config.yaml
-
-# Lock script (optional) - supports Python (.py) or shell (.sh/.bash)
-Environment=LLMPROXY_LOCK_SCRIPT=/etc/llmproxy/hook.py
-
-# Backend timeouts (in seconds)
-Environment=LLMPROXY_OAILLM_TIMEOUT=30
-Environment=LLMPROXY_OAILLM_READ_TIMEOUT=90
-Environment=LLMPROXY_TEIRERANKER_TIMEOUT=60
-Environment=LLMPROXY_TEIRERANKER_READ_TIMEOUT=120
-Environment=LLMPROXY_OAIEMBEDDINGS_TIMEOUT=30
-Environment=LLMPROXY_OAIEMBEDDINGS_READ_TIMEOUT=60
 
 # Setup and start
 ExecStartPre=/home/noname/.local/bin/uv sync
