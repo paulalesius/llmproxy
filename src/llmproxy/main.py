@@ -36,10 +36,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Global lock configuration
-LOCK_CONFIG_PATH = os.environ.get(
-    "LLMPROXY_LOCK_CONFIG", 
-    os.path.join(os.path.dirname(__file__), "../../config.yaml")
-)
+# Only enabled if LLMPROXY_LOCK_CONFIG env var is explicitly set
+# If not set, runs without any locks (disabled by default)
+LOCK_CONFIG_PATH = os.environ.get("LLMPROXY_LOCK_CONFIG")
 
 # Lock state - initialized in lifespan
 lock_config: Optional[dict] = None
@@ -50,7 +49,12 @@ path_to_group: Dict[str, str] = {}
 def load_lock_config():
     """Load global lock configuration from YAML file."""
     global lock_config, group_locks, path_to_group
-    
+
+    if not LOCK_CONFIG_PATH:
+        logger.info("Global lock disabled (LLMPROXY_LOCK_CONFIG not set)")
+        lock_config = {"enabled": False}
+        return
+
     if not os.path.exists(LOCK_CONFIG_PATH):
         logger.warning(f"Lock config not found at {LOCK_CONFIG_PATH}, running without locks")
         lock_config = {"enabled": False}
@@ -60,10 +64,16 @@ def load_lock_config():
         with open(LOCK_CONFIG_PATH, "r") as f:
             config = yaml.safe_load(f) or {}
         
-        lock_config = config.get("global_lock", {})
+        lock_config = config.get("global_lock")
+        
+        # Default: disabled unless explicitly enabled
+        if lock_config is None:
+            logger.info("Global lock: no config found, disabled by default")
+            lock_config = {"enabled": False}
+            return
         
         if not lock_config.get("enabled", False):
-            logger.info("Global lock disabled in config")
+            logger.info("Global lock: config found but not enabled")
             return
         
         # Each path gets its own lock

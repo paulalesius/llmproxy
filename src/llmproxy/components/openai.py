@@ -196,22 +196,12 @@ class OpenAIComponent:
         
         if log_level in ["debug", "trace"]:
             logger.debug(f"completions request: model={body.get('model')}, stream={body.get('stream', False)}")
-        
-        # llama-server requires a model name; fetch one if missing
+
         if "model" not in body:
-            try:
-                models_resp = await self.client.get("/v1/models")
-                models = models_resp.json()
-                if models.get("data"):
-                    default_model = models["data"][0]["id"]
-                    body = dict(body)
-                    body["model"] = default_model
-                    logger.info(f"completions using default model: {default_model}")
-                else:
-                    logger.warning("completions: no models available")
-            except Exception as e:
-                logger.error(f"completions: failed to fetch models: {e}")
-        
+            body = dict(body)
+            body["model"] = "default"
+            logger.info("completions: no model specified, using model='default'")
+
         is_stream = body.get("stream", False)
         
         if is_stream:

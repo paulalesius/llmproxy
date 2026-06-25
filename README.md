@@ -23,8 +23,14 @@ This proxy solves two main problems:
   - Full TEI spec compliance with proper index preservation
   - Hindsight API compatibility (`texts` → `documents`, `return_text` → `return_documents`)
   - High timeouts (120s read) for large document batches (1500+ docs)
+  - Uses `bge-reranker-v2-m3` model by default
 
 - **Router-mode aware**: Handles llama-server's slow model loading (20-35 seconds) with appropriate timeouts
+
+- **Global locks**: Optional serialization of chat/embeddings requests to prevent concurrent overload
+  - Enabled via `LLMPROXY_GLOBAL_LOCK=1`
+  - Returns `503 Service Unavailable` with `Retry-After` header when lock is held
+  - Rerank, models, and health endpoints run freely without locks
 
 - **Configurable logging**: `LLMPROXY_LOG_LEVEL` (info/debug/trace) for request/response inspection
 
@@ -61,13 +67,20 @@ Set these environment variables:
 | `LLMPROXY_TEIRERANKER_API_KEY` | `` | API key for reranker backend (optional) |
 | `LLMPROXY_HOST` | `0.0.0.0` | Proxy listen address |
 | `LLMPROXY_PORT` | `4001` | Proxy listen port |
-| `LLMPROXY_API_KEY` | `` | API key for proxy authentication (enabled when LLMPROXY_PORT is set) |
+| `LLMPROXY_API_KEY` | `` | API key for proxy authentication (enables when set) |
 | `LLMPROXY_LOG_LEVEL` | `info` | Log level: `info`, `debug`, or `trace` |
+| `LLMPROXY_GLOBAL_LOCK` | `` | Enable global lock for chat/embeddings (set to "1" to enable) |
 
 **Log levels:**
 - **info**: Basic logs (endpoints, status codes, timing)
 - **debug**: Full requests/responses with headers and truncated body content
 - **trace**: Everything including full text content (prompts, documents, etc.)
+
+**Global lock:**
+- When enabled, serializes requests to `/v1/chat/completions` and `/v1/embeddings` endpoints
+- Prevents concurrent requests from overwhelming llama-server
+- Other endpoints (`/v1/rerank`, `/v1/models`, `/health`) run freely without locks
+- Returns `503 Service Unavailable` with `Retry-After` header when lock is held
 
 The systemd service defaults to `debug` level.
 
@@ -173,12 +186,12 @@ curl -X POST http://localhost:4001/v1/embeddings \
 
 ### TEI Rerank examples
 
-**Full TEI format:**
+**Rerank (TEI format with bge-reranker-v2-m3):**
 ```bash
 curl -X POST http://localhost:4001/v1/rerank \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "reranker",
+    "model": "bge-reranker-v2-m3",
     "query": "machine learning",
     "documents": ["ML is great", "ML is hard", "ML is easy"],
     "top_n": 2,
@@ -218,11 +231,12 @@ bash test.sh
 
 This tests:
 - Health endpoint
-- TEI rerank (full and Hindsight formats)
+- TEI rerank (full and Hindsight formats with bge-reranker-v2-m3)
 - OpenAI models list and detail
 - Chat completions (sync and streaming)
 - Completions (with auto-model selection)
-- Embeddings
+- Embeddings (with bge-m3)
+- Global locks (serialization, 503 responses, endpoint exclusions)
 
 Tests are designed for router-mode llama-server, so they accept 500 (model loading) and 404 (model not loaded) as valid proxy behavior.
 
