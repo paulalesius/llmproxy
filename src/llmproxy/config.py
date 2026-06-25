@@ -30,10 +30,19 @@ class ServerConfig:
 
 @dataclass
 class GlobalLockConfig:
-    """Global lock configuration."""
-    enabled: bool = False
+    """Global lock configuration (optional)."""
+    enabled: bool = True  # Default to True if section exists
     locked_error: bool = False
     lock_script: str = ""
+    
+    @classmethod
+    def from_yaml(cls, data: dict) -> "GlobalLockConfig":
+        """Create from YAML data, with sensible defaults."""
+        return cls(
+            enabled=data.get("enabled", True),
+            locked_error=data.get("locked_error", False),
+            lock_script=data.get("lock_script", "")
+        )
 
 
 @dataclass
@@ -41,7 +50,7 @@ class Config:
     """Main configuration class."""
     server: ServerConfig = field(default_factory=ServerConfig)
     backends: dict = field(default_factory=dict)
-    global_lock: GlobalLockConfig = field(default_factory=GlobalLockConfig)
+    global_lock: Optional[GlobalLockConfig] = None  # Optional section
     
     def __post_init__(self):
         """Ensure backends dict has expected structure."""
@@ -88,14 +97,13 @@ def _load_from_yaml(path: str, config: Config) -> None:
         config.server.api_key = server_data.get("api_key", "")
         config.server.log_level = server_data.get("log_level", "info")
     
-    # Global lock config
+    # Global lock config (optional top-level section)
+    if "global_lock" in data:
+        config.global_lock = GlobalLockConfig.from_yaml(data["global_lock"])
+    
+    # Backends config
     if "backends" in data:
         backends_data = data["backends"]
-        
-        # Global lock settings
-        config.global_lock.enabled = backends_data.get("global_lock", False)
-        config.global_lock.locked_error = backends_data.get("locked_error", False)
-        config.global_lock.lock_script = backends_data.get("lock_script", "")
         
         # Backend configurations
         for backend_name in ["llm", "embed", "rerank"]:
@@ -136,8 +144,14 @@ def _load_from_env(config: Config) -> None:
     config.server.api_key = os.environ.get("LLMPROXY_API_KEY", "")
     config.server.log_level = os.environ.get("LLMPROXY_LOG_LEVEL", "info").lower()
     
-    # Global lock config
-    config.global_lock.lock_script = os.environ.get("LLMPROXY_LOCK_SCRIPT", "")
+    # Global lock config (optional, only if env vars are set)
+    lock_script = os.environ.get("LLMPROXY_LOCK_SCRIPT", "")
+    if lock_script:
+        config.global_lock = GlobalLockConfig(
+            enabled=True,
+            locked_error=os.environ.get("LLMPROXY_LOCKED_ERROR", "false").lower() == "true",
+            lock_script=lock_script
+        )
     
     # Backend configurations with defaults
     # LLM backend

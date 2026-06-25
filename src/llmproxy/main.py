@@ -78,6 +78,11 @@ def load_lock_config():
     """
     global backend_locks
     
+    # Check if global_lock section exists
+    if not CONFIG.global_lock:
+        logger.info("Global lock disabled (no global_lock section in config)")
+        return
+    
     if not CONFIG.global_lock.enabled:
         logger.info("Global lock disabled")
         return
@@ -126,6 +131,12 @@ def load_lock_script():
     """Load lock script hook (Python, shell script, or bash command)."""
     global lock_script_hook
     
+    # Check if global_lock section exists
+    if not CONFIG.global_lock:
+        lock_script_hook = None
+        logger.info("Lock script disabled (no global_lock section in config)")
+        return
+    
     if not CONFIG.global_lock.lock_script:
         lock_script_hook = None
         logger.info("Lock script disabled")
@@ -165,7 +176,8 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         
-        if CONFIG.global_lock.enabled:
+        # Check if global_lock section exists and is enabled
+        if CONFIG.global_lock and CONFIG.global_lock.enabled:
             # Get the backend for this path
             path_backend = get_backend_for_path(path)
             
@@ -247,7 +259,7 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
             # No locks configured for this path/backend
             return await call_next(request)
         
-        # Global lock disabled
+        # Global lock disabled or not configured
         return await call_next(request)
 
 

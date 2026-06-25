@@ -184,17 +184,30 @@ Backend-specific API keys (`LLMPROXY_LLM_API_KEY`, etc.) are also supported.
 Backend-based locking is the recommended approach. Each backend configures which OTHER backends it locks:
 
 ```yaml
+server:
+  host: 0.0.0.0
+  port: 4001
+
+# Optional global lock configuration
+# Remove this section entirely to disable locking
 global_lock:
   enabled: true
+  locked_error: false
+  lock_script: ""
+
+backends:
   llm:
+    base_url: http://127.0.0.1:8080
     locks:
       - embed
       - rerank
   embed:
+    base_url: http://127.0.0.1:8081
     locks:
       - llm
       - rerank
   rerank:
+    base_url: http://127.0.0.1:8082
     locks:
       - llm
       - embed
@@ -210,6 +223,10 @@ global_lock:
 - Each backend independently configures which other backends to lock
 - Dynamic paths like `/v1/models/xxx` are automatically matched to their backend
 - When `/v1/chat/completions` (LLM) runs, it locks `embed` and `rerank` backends
+- **`global_lock` section is optional** — omit it entirely to disable locking
+- **`enabled: true`** — if section exists but `enabled: false`, locking is disabled
+- **`locked_error: false`** — if `true`, returns 503 immediately when lock is held; if `false`, blocks until lock acquired
+- **`lock_script: ""`** — optional Python/shell/bash command to run during locked execution
 
 **Legacy path-based locking** (older format, still supported):
 

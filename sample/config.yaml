@@ -1,13 +1,21 @@
+# LLM Proxy Configuration
+# General settings loaded early, global_lock is optional
+
 server:
   host: 0.0.0.0
   port: 4001
   api_key: ""
   log_level: debug
 
-backends:
-  global_lock: true
+# Optional global lock configuration
+# If this section exists, locking is enabled (default: enabled=true)
+# Remove this section entirely to disable locking
+global_lock:
+  enabled: true
   locked_error: false
   lock_script: ""
+
+backends:
   llm:
     base_url: http://127.0.0.1:8080
     api_key: ""
