@@ -5,24 +5,33 @@ server:
   log_level: info
 
 backends:
-  global_lock: false
-  locked_error: false
+  # Default lock_script for all backends (can be overridden per-backend)
   lock_script: ""
+  global_lock: true  # Controls enabled/locked_error at global_lock level
+  
   llm:
     base_url: http://127.0.0.1:8080
     api_key: ""
     timeout: 30
     read_timeout: 90
     locks: []
+    # Can override default lock_script or set its own
+    # lock_script: "/path/to/llm-specific-lock.sh"
+  
   embed:
     base_url: http://127.0.0.1:8081
     api_key: ""
     timeout: 30
     read_timeout: 60
     locks: []
+  
   rerank:
     base_url: http://127.0.0.1:8082
     api_key: ""
     timeout: 30
     read_timeout: 120
     locks: []
+
+global_lock:
+  enabled: true
+  locked_error: false

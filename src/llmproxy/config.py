@@ -17,6 +17,7 @@ class BackendConfig:
     timeout: int = 30
     read_timeout: int = 60
     locks: list = field(default_factory=list)
+    lock_script: str = ""  # Per-backend lock script (optional)
 
 
 @dataclass
@@ -30,18 +31,16 @@ class ServerConfig:
 
 @dataclass
 class GlobalLockConfig:
-    """Global lock configuration (optional)."""
+    """Global lock configuration (optional, controls enabled/locked_error)."""
     enabled: bool = True  # Default to True if section exists
     locked_error: bool = False
-    lock_script: str = ""
     
     @classmethod
     def from_yaml(cls, data: dict) -> "GlobalLockConfig":
         """Create from YAML data, with sensible defaults."""
         return cls(
             enabled=data.get("enabled", True),
-            locked_error=data.get("locked_error", False),
-            lock_script=data.get("lock_script", "")
+            locked_error=data.get("locked_error", False)
         )
 
 
@@ -51,6 +50,7 @@ class Config:
     server: ServerConfig = field(default_factory=ServerConfig)
     backends: dict = field(default_factory=dict)
     global_lock: Optional[GlobalLockConfig] = None  # Optional section
+    backends_raw: dict = field(default_factory=dict)  # Raw backends section for defaults
     
     def __post_init__(self):
         """Ensure backends dict has expected structure."""
@@ -105,6 +105,9 @@ def _load_from_yaml(path: str, config: Config) -> None:
     if "backends" in data:
         backends_data = data["backends"]
         
+        # Store raw backends data for defaults (like backends.lock_script)
+        config.backends_raw = backends_data
+        
         # Backend configurations
         for backend_name in ["llm", "embed", "rerank"]:
             if backend_name in backends_data:
@@ -129,6 +132,9 @@ def _load_from_yaml(path: str, config: Config) -> None:
                 
                 # Lock configuration
                 backend_config.locks = backend_config_data.get("locks", [])
+                
+                # Per-backend lock script
+                backend_config.lock_script = backend_config_data.get("lock_script", "")
                 
                 config.backends[backend_name] = backend_config
             else:

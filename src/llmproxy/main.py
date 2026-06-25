@@ -67,14 +67,40 @@ API_KEY_ENABLED = bool(CONFIG.server.api_key)
 # Lock state - initialized in lifespan
 backend_locks: Dict[Backend, asyncio.Lock] = {}
 
-# Script hooks - initialized in lifespan
-lock_script_hook: Optional[dict] = None
+# Script hooks - one per backend, initialized in lifespan
+lock_script_hooks: Dict[Backend, Optional[dict]] = {}
+
+
+def get_lock_script_for_backend(backend: Backend) -> str:
+    """Get the lock script for a specific backend.
+    
+    Checks in order:
+    1. Per-backend lock_script (e.g., backends.llm.lock_script)
+    2. Default lock_script at backends level (backends.lock_script)
+    
+    Returns empty string if no script configured.
+    """
+    backend_name = backend.value
+    
+    # Check per-backend lock_script first
+    if backend_name in CONFIG.backends:
+        backend_config = CONFIG.backends[backend_name]
+        if hasattr(backend_config, 'lock_script') and backend_config.lock_script:
+            return backend_config.lock_script
+    
+    # Check for default lock_script at backends level
+    # This is stored separately in CONFIG.backends_default_lock_script
+    if hasattr(CONFIG, 'backends_default_lock_script'):
+        return CONFIG.backends_default_lock_script
+    
+    return ""
 
 
 def load_lock_config():
     """Load global lock configuration from config object.
     
     Backend-based locking: each backend lists which OTHER backends to lock.
+    Also loads per-backend lock_script configuration.
     """
     global backend_locks
     
@@ -92,6 +118,13 @@ def load_lock_config():
     
     # Parse backend-based configuration
     backend_lock_mapping: dict[Backend, set[Backend]] = {}
+    
+    # Check for default lock_script at backends level (backends.lock_script)
+    CONFIG.backends_default_lock_script = ""
+    if hasattr(CONFIG, 'backends_raw') and 'lock_script' in CONFIG.backends_raw:
+        CONFIG.backends_default_lock_script = CONFIG.backends_raw.get('lock_script', "")
+        if CONFIG.backends_default_lock_script:
+            logger.info(f"Default lock_script configured at backends level: {CONFIG.backends_default_lock_script}")
     
     for backend_name, config_entry in CONFIG.backends.items():
         if backend_name not in BACKEND_NAME_TO_ENUM:
@@ -120,6 +153,10 @@ def load_lock_config():
             logger.info(f"Backend {backend_name} locks: {lock_names}")
         else:
             logger.info(f"Backend {backend_name} has no locks configured")
+        
+        # Log per-backend lock_script if configured
+        if hasattr(config_entry, 'lock_script') and config_entry.lock_script:
+            logger.info(f"Backend {backend_name} has lock_script: {config_entry.lock_script}")
     
     # Store the mapping for middleware to use
     CONFIG.backend_lock_mapping = backend_lock_mapping
@@ -128,41 +165,47 @@ def load_lock_config():
 
 
 def load_lock_script():
-    """Load lock script hook (Python, shell script, or bash command)."""
-    global lock_script_hook
+    """Load lock script hooks for each backend (Python, shell script, or bash command).
+    
+    Each backend can have its own lock_script, or use the default from backends.lock_script.
+    """
+    global lock_script_hooks
     
     # Check if global_lock section exists
     if not CONFIG.global_lock:
-        lock_script_hook = None
-        logger.info("Lock script disabled (no global_lock section in config)")
+        lock_script_hooks = {backend: None for backend in Backend}
+        logger.info("Lock scripts disabled (no global_lock section in config)")
         return
     
-    if not CONFIG.global_lock.lock_script:
-        lock_script_hook = None
-        logger.info("Lock script disabled")
-        return
-    
-    # Import the loader function to avoid name collision
+    # Import the loader function
     from .script_loader import load_lock_script as load_script_from_path
     
-    # Use the new load_lock_script() function that handles all three modes
-    hook = load_script_from_path(CONFIG.global_lock.lock_script)
-    lock_script_hook = hook
+    # Load lock script for each backend
+    lock_script_hooks = {}
     
-    if hook["error"]:
-        logger.warning(f"Lock script: {hook['error']}")
-    else:
-        if hook["type"] == "python":
-            logger.info(f"Lock script loaded (Python): {CONFIG.global_lock.lock_script}")
-            if hook["handle_request"]:
-                logger.info("  - has handle_request() function")
+    for backend in Backend:
+        script_path = get_lock_script_for_backend(backend)
+        
+        if script_path:
+            hook = load_script_from_path(script_path)
+            lock_script_hooks[backend] = hook
+            
+            if hook["error"]:
+                logger.warning(f"Lock script for {backend.value}: {hook['error']}")
             else:
-                logger.info("  - runs as plain script on import")
-        elif hook["type"] == "shell":
-            logger.info(f"Lock script loaded (shell): {hook['path']}")
-            logger.info(f"  - executable: {hook['executable']}")
-        elif hook["type"] == "command":
-            logger.info(f"Lock script loaded (bash command): {hook['command']}")
+                if hook["type"] == "python":
+                    logger.info(f"Lock script loaded for {backend.value} (Python): {script_path}")
+                    if hook["handle_request"]:
+                        logger.info(f"  - has handle_request() function")
+                    else:
+                        logger.info(f"  - runs as plain script on import")
+                elif hook["type"] == "shell":
+                    logger.info(f"Lock script loaded for {backend.value} (shell): {hook['path']}")
+                    logger.info(f"  - executable: {hook['executable']}")
+                elif hook["type"] == "command":
+                    logger.info(f"Lock script loaded for {backend.value} (bash command): {hook['command']}")
+        else:
+            lock_script_hooks[backend] = None
 
 
 class GlobalLockMiddleware(BaseHTTPMiddleware):
@@ -222,21 +265,23 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
                         
                         try:
                             # Lock script hook (runs once during locked execution)
-                            if lock_script_hook:
+                            # Use per-backend lock_script_hooks[path_backend]
+                            backend_hook = lock_script_hooks.get(path_backend)
+                            if backend_hook:
                                 request_data = {
                                     "method": request.method,
                                     "path": request.url.path,
                                     "url": str(request.url),
                                     "headers": dict(request.headers),
                                 }
-                                result = execute_lock_script(lock_script_hook, request_data)
+                                result = execute_lock_script(backend_hook, request_data)
                                 if not result["success"]:
-                                    logger.warning(f"Lock script failed: {result['error']}")
+                                    logger.warning(f"Lock script failed for {path_backend.value}: {result['error']}")
                             
                             response = await call_next(request)
                             
                             # Post-response hook (if Python with handle_request that accepts response_status)
-                            if lock_script_hook and lock_script_hook.get("type") == "python":
+                            if backend_hook and backend_hook.get("type") == "python":
                                 request_data = {
                                     "method": request.method,
                                     "path": request.url.path,
@@ -244,10 +289,10 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
                                     "headers": dict(request.headers),
                                     "response_status": response.status_code,
                                 }
-                                if lock_script_hook.get("handle_request"):
-                                    result = execute_lock_script(lock_script_hook, request_data)
+                                if backend_hook.get("handle_request"):
+                                    result = execute_lock_script(backend_hook, request_data)
                                     if not result["success"]:
-                                        logger.warning(f"Lock script post-response failed: {result['error']}")
+                                        logger.warning(f"Lock script post-response failed for {path_backend.value}: {result['error']}")
                             
                             return response
                             
