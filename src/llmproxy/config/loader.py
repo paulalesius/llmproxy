@@ -57,6 +57,7 @@ def build_app_config(raw: Dict[str, Any]) -> AppConfig:
                 read_timeout=int(entry.get("read_timeout", entry.get("readTimeout", 60))),
                 locks=entry.get("locks", []) or [],
                 enabled=entry.get("enabled", True),
+                lock_script=entry.get("lock_script"),
             )
 
     # Ensure we always have the three main backends
@@ -91,6 +92,7 @@ def build_app_config(raw: Dict[str, Any]) -> AppConfig:
         enabled=bool(lock_raw.get("enabled", True)),
         locked_error=bool(lock_raw.get("locked_error", False)),
         backends=raw_backends,
+        lock_script=lock_raw.get("lock_script"),
     )
 
     api_key = raw.get("api_key") or server_raw.get("api_key") or ""

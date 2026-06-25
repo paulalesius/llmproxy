@@ -11,6 +11,7 @@ from starlette.status import HTTP_503_SERVICE_UNAVAILABLE
 
 from ..config import get_config
 from ..routing.backends import Backend, get_backend_for_path
+from ..script_loader import load_lock_script, execute_lock_script
 
 logger = logging.getLogger(__name__)
 
@@ -20,43 +21,80 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
     
     # Lock state
     _locks: dict[str, asyncio.Lock] = {}
-    _lock_conditions: dict[str, asyncio.Condition] = {}
+    _lock_hooks: dict[str, dict] = {}  # backend_name -> loaded hook
     
     def __init__(self, app):
         super().__init__(app)
-        self._initialized = False
     
     async def _ensure_lock_initialized(self, backend: str) -> None:
-        """Ensure lock and condition exist for backend."""
+        """Ensure lock exists for backend."""
         if backend not in self._locks:
             self._locks[backend] = asyncio.Lock()
-            self._lock_conditions[backend] = asyncio.Condition()
     
     def _get_locking_backends(self, backend: str) -> list[str]:
         """Get list of backends that lock this backend."""
         config = get_config()
         return config.lock.backends.get(backend, [])
     
-    async def _try_acquire_locks(self, backend: str) -> bool:
-        """Try to acquire all locks without blocking. Returns True if all acquired."""
-        locking_backends = self._get_locking_backends(backend)
-        acquired: list[str] = []
+    def _get_lock_script_for_backend(self, backend: str) -> Optional[str]:
+        """Get lock script path for a backend (backend-specific or global)."""
+        config = get_config()
+        # Check backend-specific first
+        backend_config = config.backends.get(backend)
+        if backend_config and backend_config.lock_script:
+            return backend_config.lock_script
+        # Fall back to global
+        return config.lock.lock_script
+    
+    async def _load_lock_hook(self, backend: str) -> Optional[dict]:
+        """Load lock script hook for backend if configured."""
+        script_path = self._get_lock_script_for_backend(backend)
+        if not script_path:
+            return None
         
-        try:
-            for locking_backend in sorted(locking_backends):
-                await self._ensure_lock_initialized(locking_backend)
-                async with self._lock_conditions[locking_backend]:
-                    if await self._locks[locking_backend].wait_for(
-                        asyncio.Event().wait(), timeout=0
-                    ):
-                        acquired.append(locking_backend)
-                        logger.debug(f"Acquired lock for {backend} via {locking_backend}")
-                    else:
-                        return False
-            return True
-        except Exception:
-            await self._release_acquired(acquired)
-            raise
+        # Cache hook per backend
+        if backend not in self._lock_hooks:
+            hook = load_lock_script(script_path)
+            self._lock_hooks[backend] = hook
+            if hook.get("error"):
+                logger.warning(f"Lock script for {backend}: {hook['error']}")
+            else:
+                logger.info(f"Loaded lock script for {backend}: {hook.get('type')}")
+        
+        return self._lock_hooks.get(backend)
+    
+    async def _run_lock_hook(
+        self,
+        backend: str,
+        phase: str,
+        request: Request,
+        response_status: Optional[int] = None,
+    ) -> None:
+        """Run lock script hook (pre or post phase)."""
+        hook = await self._load_lock_hook(backend)
+        if not hook or hook.get("error"):
+            return
+        
+        # Build request data for hook
+        request_data = {
+            "phase": phase,
+            "method": request.method,
+            "path": request.url.path,
+            "url": str(request.url),
+            "headers": dict(request.headers),
+            "backend": backend,
+            "global_lock_enabled": True,
+        }
+        
+        if phase == "post" and response_status is not None:
+            request_data["response_status"] = response_status
+        
+        # Execute hook
+        result = execute_lock_script(hook, request_data)
+        if result.get("error"):
+            logger.warning(f"Lock hook {phase} for {backend}: {result['error']}")
+        elif result.get("result"):
+            logger.debug(f"Lock hook {phase} for {backend}: {result['result']}")
     
     async def _acquire_locks(self, backend: str) -> None:
         """Acquire locks for all backends that lock this one (blocking)."""
@@ -64,19 +102,8 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
         
         for locking_backend in sorted(locking_backends):
             await self._ensure_lock_initialized(locking_backend)
-            async with self._lock_conditions[locking_backend]:
-                await self._locks[locking_backend].acquire()
-                logger.debug(f"Acquired lock for {backend} via {locking_backend}")
-    
-    async def _release_acquired(self, acquired: list[str]) -> None:
-        """Release locks that were acquired."""
-        for locking_backend in acquired:
-            if locking_backend in self._locks:
-                try:
-                    self._locks[locking_backend].release()
-                    logger.debug(f"Released lock for {locking_backend}")
-                except RuntimeError:
-                    logger.warning(f"Lock for {locking_backend} not held")
+            await self._locks[locking_backend].acquire()
+            logger.debug(f"Acquired lock for {backend} via {locking_backend}")
     
     async def _release_locks(self, backend: str) -> None:
         """Release locks for all backends that lock this one."""
@@ -137,12 +164,23 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
                     },
                 )
         
+        # Run pre-hook
+        await self._run_lock_hook(backend_name, "pre", request)
+        
         try:
             # Acquire locks
             await self._acquire_locks(backend_name)
             
             # Process request
-            return await call(request)
+            response = await call(request)
+            
+            # Get status code for post-hook
+            status_code = getattr(response, "status_code", None)
+            
+            # Run post-hook
+            await self._run_lock_hook(backend_name, "post", request, status_code)
+            
+            return response
         
         finally:
             # Release locks

@@ -69,9 +69,8 @@ class OpenAIComponent:
                     yield line + "\n"
             return StreamingResponse(stream_gen(), media_type="text/event-stream"), 200
 
-        if return_response:
-            return result
-        return result[0] if isinstance(result, tuple) else result
+        # Always return tuple (data, status) for consistent error handling
+        return result
 
     async def completions(self, body: dict, return_response: bool = False):
         # Auto-fill model if missing
@@ -88,9 +87,8 @@ class OpenAIComponent:
                     yield line + "\n"
             return StreamingResponse(stream_gen(), media_type="text/event-stream"), 200
 
-        if return_response:
-            return result
-        return result[0] if isinstance(result, tuple) else result
+        # Always return tuple (data, status) for consistent error handling
+        return result
 
     async def models(self):
         data, status = await self._request("GET", "/v1/models")

@@ -14,6 +14,7 @@ class BackendConfig:
     api_key: str = ""
     locks: list[str] = field(default_factory=list)
     enabled: bool = True
+    lock_script: Optional[str] = None
 
 
 @dataclass
@@ -31,6 +32,7 @@ class LockConfig:
     locked_error: bool = False
     timeout: int = 300
     backends: dict[str, list[str]] = field(default_factory=dict)
+    lock_script: Optional[str] = None
 
 
 @dataclass

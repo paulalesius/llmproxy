@@ -57,30 +57,24 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @app.post("/v1/chat/completions")
     async def chat_completions(request: Request):
         body = await request.json()
-        result = await app.state.openai.chat_completions(body)
-
-        if isinstance(result, tuple):
-            data, status = result
-            # Streaming case: component already returns a StreamingResponse
-            if isinstance(data, StreamingResponse):
-                return data
-            return JSONResponse(content=data, status_code=status)
-
-        return result
+        # Always returns tuple (data, status) now
+        data, status = await app.state.openai.chat_completions(body)
+        
+        # Streaming case: component already returns a StreamingResponse
+        if isinstance(data, StreamingResponse):
+            return data
+        return JSONResponse(content=data, status_code=status)
 
 
     @app.post("/v1/completions")
     async def completions(request: Request):
         body = await request.json()
-        result = await app.state.openai.completions(body)
-
-        if isinstance(result, tuple):
-            data, status = result
-            if isinstance(data, StreamingResponse):
-                return data
-            return JSONResponse(content=data, status_code=status)
-
-        return result
+        # Always returns tuple (data, status) now
+        data, status = await app.state.openai.completions(body)
+        
+        if isinstance(data, StreamingResponse):
+            return data
+        return JSONResponse(content=data, status_code=status)
 
     @app.post("/v1/embeddings")
     async def embeddings(request: Request):
