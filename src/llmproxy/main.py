@@ -169,14 +169,9 @@ def load_lock_script():
     """Load lock script hooks for each backend (Python, shell script, or bash command).
 
     Each backend can have its own lock_script, or use the default from backends.lock_script.
+    Lock scripts are loaded regardless of global_lock.enabled status.
     """
     global lock_script_hooks
-
-    # Scripts only make sense when global locking is enabled
-    if not CONFIG.global_lock.enabled:
-        lock_script_hooks = {backend: None for backend in Backend}
-        logger.info("Lock scripts disabled (global_lock.enabled=false)")
-        return
 
     # Import the loader function
     from .script_loader import load_lock_script as load_script_from_path
@@ -220,93 +215,91 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # Global locking enabled purely by config.global_lock.enabled
-        if CONFIG.global_lock.enabled:
-            # Get the backend for this path
-            path_backend = get_backend_for_path(path)
-
-            if path_backend:
-                # Get which backends this backend should lock
-                backend_locks_mapping = getattr(CONFIG, 'backend_lock_mapping', {})
-                locks_to_acquire_backends = backend_locks_mapping.get(path_backend, set())
-
-                if locks_to_acquire_backends:
-                    # Convert to actual lock objects
-                    locks_to_acquire = []
-                    for lock_backend in sorted(locks_to_acquire_backends, key=lambda b: b.value):
-                        if lock_backend in backend_locks:
-                            locks_to_acquire.append(backend_locks[lock_backend])
-
-                    if locks_to_acquire:
-                        logger.info(f"[GlobalLock] {path} ({path_backend.value}) acquiring locks for: {[b.value for b in locks_to_acquire_backends]}")
-
-                        locked_error = CONFIG.global_lock.locked_error
-
-                        if locked_error:
-                            # Best-effort check: om någon av locks är upptagen → 503 direkt
-                            if any(lock.locked() for lock in locks_to_acquire):
-                                return JSONResponse(
-                                    status_code=503,
-                                    content={
-                                        "error": {
-                                            "message": f"Service temporarily busy, {path_backend.value} backend is locked",
-                                            "type": "service_busy",
-                                            "retry_after": 2
-                                        }
-                                    }
-                                )
-
-                            # Alla var lediga → lås dem
-                            for lock in locks_to_acquire:
-                                await lock.acquire()
-                        else:
-                            # Block until all locks are acquired
-                            for lock in locks_to_acquire:
-                                await lock.acquire()
-
-                        try:
-                            # Lock script hook (runs once during locked execution)
-                            # Use per-backend lock_script_hooks[path_backend]
-                            backend_hook = lock_script_hooks.get(path_backend)
-                            if backend_hook:
-                                request_data = {
-                                    "method": request.method,
-                                    "path": request.url.path,
-                                    "url": str(request.url),
-                                    "headers": dict(request.headers),
+        # Get the backend for this path
+        path_backend = get_backend_for_path(path)
+        global_lock_enabled = CONFIG.global_lock.enabled
+        
+        # Determine which backends this one locks (only if global lock enabled)
+        locks_to_acquire_backends = set()
+        if global_lock_enabled and path_backend:
+            backend_locks_mapping = getattr(CONFIG, 'backend_lock_mapping', {})
+            locks_to_acquire_backends = backend_locks_mapping.get(path_backend, set())
+        
+        # Acquire locks if enabled and this backend locks others
+        locks_to_acquire = []
+        if global_lock_enabled and path_backend and locks_to_acquire_backends:
+            for lock_backend in sorted(locks_to_acquire_backends, key=lambda b: b.value):
+                if lock_backend in backend_locks:
+                    locks_to_acquire.append(backend_locks[lock_backend])
+            
+            if locks_to_acquire:
+                logger.info(f"[GlobalLock] {path} ({path_backend.value}) acquiring locks for: {[b.value for b in locks_to_acquire_backends]}")
+                
+                locked_error = CONFIG.global_lock.locked_error
+                
+                if locked_error:
+                    # Best-effort check: om någon av locks är upptagen → 503 direkt
+                    if any(lock.locked() for lock in locks_to_acquire):
+                        return JSONResponse(
+                            status_code=503,
+                            content={
+                                "error": {
+                                    "message": f"Service temporarily busy, {path_backend.value} backend is locked",
+                                    "type": "service_busy",
+                                    "retry_after": 2
                                 }
-                                result = execute_lock_script(backend_hook, request_data)
-                                if not result["success"]:
-                                    logger.warning(f"Lock script failed for {path_backend.value}: {result['error']}")
-
-                            response = await call_next(request)
-
-                            # Post-response hook (if Python with handle_request that accepts response_status)
-                            if backend_hook and backend_hook.get("type") == "python":
-                                request_data = {
-                                    "method": request.method,
-                                    "path": request.url.path,
-                                    "url": str(request.url),
-                                    "headers": dict(request.headers),
-                                    "response_status": response.status_code,
-                                }
-                                if backend_hook.get("handle_request"):
-                                    result = execute_lock_script(backend_hook, request_data)
-                                    if not result["success"]:
-                                        logger.warning(f"Lock script post-response failed for {path_backend.value}: {result['error']}")
-
-                            return response
-
-                        finally:
-                            # Release locks in reverse order
-                            for lock in reversed(locks_to_acquire):
-                                lock.release()
-
-            # No locks configured for this path/backend
-            return await call_next(request)
-
-        # Global lock disabled or not configured
-        return await call_next(request)
+                            }
+                        )
+                
+                # Alla var lediga → lås dem
+                for lock in locks_to_acquire:
+                    await lock.acquire()
+        
+        # Get lock_script hook for this backend (if configured)
+        backend_hook = None
+        if path_backend:
+            backend_hook = lock_script_hooks.get(path_backend)
+        
+        # Pre-request hook (if lock_script configured)
+        if backend_hook:
+            request_data = {
+                "method": request.method,
+                "path": request.url.path,
+                "url": str(request.url),
+                "headers": dict(request.headers),
+                "phase": "pre",
+                "global_lock_enabled": global_lock_enabled,
+            }
+            result = execute_lock_script(backend_hook, request_data)
+            if not result["success"]:
+                logger.warning(f"Lock script pre-request failed for {path_backend.value}: {result['error']}")
+        
+        try:
+            # Make request to backend
+            response = await call_next(request)
+            
+            # Post-request hook (if lock_script configured)
+            if backend_hook:
+                request_data = {
+                    "method": request.method,
+                    "path": request.url.path,
+                    "url": str(request.url),
+                    "headers": dict(request.headers),
+                    "response_status": response.status_code,
+                    "phase": "post",
+                    "global_lock_enabled": global_lock_enabled,
+                }
+                result = execute_lock_script(backend_hook, request_data)
+                if not result["success"]:
+                    logger.warning(f"Lock script post-request failed for {path_backend.value}: {result['error']}")
+            
+            return response
+            
+        finally:
+            # Release locks in reverse order (only if we acquired them)
+            if locks_to_acquire:
+                for lock in reversed(locks_to_acquire):
+                    lock.release()
 
 
 class APIKeyMiddleware(BaseHTTPMiddleware):

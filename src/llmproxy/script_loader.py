@@ -201,12 +201,16 @@ def execute_lock_script(hook: dict, request_data: dict = None) -> dict:
                 env["LOCK_SCRIPT_URL"] = request_data.get("url", "")
                 env["LOCK_SCRIPT_HEADERS"] = str(request_data.get("headers", {}))
                 
+                # Phase indicator
+                phase = request_data.get("phase", "pre")
+                env["LOCK_SCRIPT_PHASE"] = phase
+                
+                # Global lock status
+                env["LOCK_SCRIPT_GLOBAL_LOCK_ENABLED"] = str(request_data.get("global_lock_enabled", False)).lower()
+                
                 # Post-phase specific
-                if request_data.get("phase") == "post":
+                if phase == "post":
                     env["LOCK_SCRIPT_RESPONSE_STATUS"] = str(request_data.get("response_status", ""))
-                    env["LOCK_SCRIPT_PHASE"] = "post"
-                else:
-                    env["LOCK_SCRIPT_PHASE"] = "pre"
             
             # Run script or command
             if command:
