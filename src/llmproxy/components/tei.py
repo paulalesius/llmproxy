@@ -94,10 +94,10 @@ class TEIComponent:
     
     def __init__(self):
         self.base_url = os.environ.get(
-            "LLMPROXY_TEIRERANKER_BASE_URL",
+            "LLMPROXY_RERANK_BASE_URL",
             "http://127.0.0.1:8082"
         )
-        self.api_key = os.environ.get("LLMPROXY_TEIRERANKER_API_KEY", "")
+        self.api_key = os.environ.get("LLMPROXY_RERANK_API_KEY", "")
         
         # Set timeout to 60s for large batches (Hindsight can send 1500+ docs)
         self.client = httpx.AsyncClient(

@@ -57,10 +57,10 @@ class EmbeddingsComponent:
 
     def __init__(self):
         self.base_url = os.environ.get(
-            "LLMPROXY_OAIEMBEDDINGS_BASE_URL",
+            "LLMPROXY_EMBED_BASE_URL",
             "http://127.0.0.1:8081"
         )
-        self.api_key = os.environ.get("LLMPROXY_OAIEMBEDDINGS_API_KEY", "")
+        self.api_key = os.environ.get("LLMPROXY_EMBED_API_KEY", "")
         
         # Embeddings are typically fast, but allow for batch processing
         self.client = httpx.AsyncClient(

@@ -64,10 +64,10 @@ class OpenAIComponent:
 
     def __init__(self):
         self.base_url = os.environ.get(
-            "LLMPROXY_OAILLM_BASE_URL",
+            "LLMPROXY_LLM_BASE_URL",
             "http://127.0.0.1:8080"
         )
-        self.api_key = os.environ.get("LLMPROXY_OAILLM_API_KEY", "")
+        self.api_key = os.environ.get("LLMPROXY_LLM_API_KEY", "")
         
         # Router-mode: model loading can take 20s+, use config timeouts
         self.client = httpx.AsyncClient(

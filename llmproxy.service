@@ -9,9 +9,9 @@ Group=noname
 WorkingDirectory=/src/llmproxy
 
 # LLM server (chat/completions/models)
-Environment=LLMPROXY_OAILLM_BASE_URL=http://127.0.0.1:8080
-Environment=LLMPROXY_OAILLM_API_KEY=
-Environment=LLMPROXY_OAILLM_TIMEOUT=30
+Environment=LLMPROXY_LLM_BASE_URL=http://127.0.0.1:8080
+Environment=LLMPROXY_LLM_API_KEY=
+Environment=LLMPROXY_LLM_TIMEOUT=30
 
 # Reranker server (TEI rerank)
 Environment=LLMPROXY_TEIRERANKER_BASE_URL=http://127.0.0.1:8082
@@ -19,9 +19,9 @@ Environment=LLMPROXY_TEIRERANKER_API_KEY=
 Environment=LLMPROXY_TEIRERANKER_TIMEOUT=30
 
 # Embeddings server (dedicated embeddings instance)
-Environment=LLMPROXY_OAIEMBEDDINGS_BASE_URL=http://127.0.0.1:8081
-Environment=LLMPROXY_OAIEMBEDDINGS_API_KEY=
-Environment=LLMPROXY_OAIEMBEDDINGS_TIMEOUT=30
+Environment=LLMPROXY_EMBED_BASE_URL=http://127.0.0.1:8081
+Environment=LLMPROXY_EMBED_API_KEY=
+Environment=LLMPROXY_EMBED_TIMEOUT=30
 
 # Proxy configuration
 Environment=LLMPROXY_HOST=0.0.0.0

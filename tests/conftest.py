@@ -15,7 +15,7 @@ TEST_PID_FILE = Path("/tmp/llmproxy_test.pid")
 # Backend URLs (use environment or defaults)
 LLAMA_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8080")
 TEI_URL = os.environ.get("LLMPROXY_TEI_BASE_URL", "http://127.0.0.1:8082")
-EMBEDDINGS_URL = os.environ.get("LLMPROXY_OAIEMBEDDINGS_BASE_URL", "http://127.0.0.1:8081")
+EMBEDDINGS_URL = os.environ.get("LLMPROXY_EMBED_BASE_URL", "http://127.0.0.1:8081")
 
 
 @pytest.fixture(scope="session")
@@ -27,9 +27,9 @@ def llmproxy_server():
     project_root = Path(__file__).parent.parent
     env = os.environ.copy()
     env["LLMPROXY_PORT"] = str(TEST_PORT)
-    env["LLMPROXY_TEIRERANKER_BASE_URL"] = TEI_URL
-    env["LLMPROXY_OAILLM_BASE_URL"] = LLAMA_URL
-    env["LLMPROXY_OAIEMBEDDINGS_BASE_URL"] = EMBEDDINGS_URL
+    env["LLMPROXY_RERANK_BASE_URL"] = TEI_URL
+    env["LLMPROXY_LLM_BASE_URL"] = LLAMA_URL
+    env["LLMPROXY_EMBED_BASE_URL"] = EMBEDDINGS_URL
     
     # Start server
     proc = subprocess.Popen(
