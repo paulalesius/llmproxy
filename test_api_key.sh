@@ -8,9 +8,9 @@ echo "=== LLM Proxy API Key Authentication Test ==="
 # Setup environment
 export LLMPROXY_PORT=5001
 export LLMPROXY_API_KEY="test-api-key-123"
-export LLMPROXY_OAILLM_BASE_URL="http://127.0.0.1:8080"
+export LLMPROXY_LLM_BASE_URL="http://127.0.0.1:8080"
 export LLMPROXY_TEIRERANKER_BASE_URL="http://127.0.0.1:8082"
-export LLMPROXY_OAIEMBEDDINGS_BASE_URL="http://127.0.0.1:8081"
+export LLMPROXY_EMBED_BASE_URL="http://127.0.0.1:8081"
 export LLMPROXY_LOG_LEVEL="info"
 
 BASE_URL="http://127.0.0.1:5001"

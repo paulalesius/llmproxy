@@ -29,13 +29,13 @@ export LLMPROXY_TEST_PORT="${LLMPROXY_TEST_PORT:-4002}"
 # Backend URLs (use environment or defaults)
 export BACKEND_URL="${BACKEND_URL:-http://127.0.0.1:8080}"
 export LLMPROXY_TEI_BASE_URL="${LLMPROXY_TEI_BASE_URL:-http://127.0.0.1:8082}"
-export LLMPROXY_OAIEMBEDDINGS_BASE_URL="${LLMPROXY_OAIEMBEDDINGS_BASE_URL:-http://127.0.0.1:8081}"
+export LLMPROXY_EMBED_BASE_URL="${LLMPROXY_EMBED_BASE_URL:-http://127.0.0.1:8081}"
 
 echo "Test configuration:"
 echo "  Test port: $LLMPROXY_TEST_PORT"
 echo "  LLaMA backend: $BACKEND_URL"
 echo "  TEI backend: $LLMPROXY_TEI_BASE_URL"
-echo "  Embeddings backend: $LLMPROXY_OAIEMBEDDINGS_BASE_URL"
+echo "  Embeddings backend: $LLMPROXY_EMBED_BASE_URL"
 echo ""
 
 # Sync dependencies with uv

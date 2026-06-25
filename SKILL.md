@@ -24,7 +24,7 @@ The LLM Proxy is a FastAPI-based server that:
 cd /src/llmproxy
 
 # Set environment variables
-export LLMPROXY_OAILLM_BASE_URL=http://127.0.0.1:8080
+export LLMPROXY_LLM_BASE_URL=http://127.0.0.1:8080
 export LLMPROXY_TEIRERANKER_BASE_URL=http://127.0.0.1:8082
 export LLMPROXY_PORT=4001
 
@@ -36,8 +36,8 @@ uv run python -m src.llmproxy.main
 
 | Variable | Default | Required | Description |
 |----------|---------|----------|-------------|
-| `LLMPROXY_OAILLM_BASE_URL` | `http://127.0.0.1:8080` | Yes | LLM llama-server URL |
-| `LLMPROXY_OAILLM_API_KEY` | `` | No | API key for LLM backend |
+| `LLMPROXY_LLM_BASE_URL` | `http://127.0.0.1:8080` | Yes | LLM llama-server URL |
+| `LLMPROXY_LLM_API_KEY` | `` | No | API key for LLM backend |
 | `LLMPROXY_TEIRERANKER_BASE_URL` | `http://127.0.0.1:8082` | Yes | Reranker llama-server URL |
 | `LLMPROXY_TEIRERANKER_API_KEY` | `` | No | API key for reranker backend |
 | `LLMPROXY_HOST` | `0.0.0.0` | No | Listen address |
@@ -57,8 +57,8 @@ The project includes `llmproxy.service` for systemd deployment:
 
 ```ini
 [Service]
-Environment="LLMPROXY_OAILLM_BASE_URL=http://127.0.0.1:8080"
-Environment="LLMPROXY_OAILLM_API_KEY="
+Environment="LLMPROXY_LLM_BASE_URL=http://127.0.0.1:8080"
+Environment="LLMPROXY_LLM_API_KEY="
 Environment="LLMPROXY_TEIRERANKER_BASE_URL=http://127.0.0.1:8082"
 Environment="LLMPROXY_TEIRERANKER_API_KEY="
 Environment="LLMPROXY_HOST=0.0.0.0"
