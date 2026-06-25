@@ -1,4 +1,4 @@
-"""Configuration loader - YAML + environment overrides (YAML is authoritative)."""
+"""Configuration loader - YAML only (authoritative)."""
 
 import os
 import yaml
@@ -17,19 +17,6 @@ def load_yaml_config(path: Optional[str] = None) -> Dict[str, Any]:
             with open(candidate, "r") as f:
                 return yaml.safe_load(f) or {}
     return {}
-
-
-def apply_env_overrides(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Apply a few common environment overrides (kept minimal)."""
-    if os.environ.get("LLMPROXY_HOST"):
-        raw.setdefault("server", {})["host"] = os.environ["LLMPROXY_HOST"]
-    if os.environ.get("LLMPROXY_PORT"):
-        raw.setdefault("server", {})["port"] = int(os.environ["LLMPROXY_PORT"])
-    if os.environ.get("LLMPROXY_LOG_LEVEL"):
-        raw.setdefault("server", {})["log_level"] = os.environ["LLMPROXY_LOG_LEVEL"]
-    if os.environ.get("LLMPROXY_API_KEY"):
-        raw["api_key"] = os.environ["LLMPROXY_API_KEY"]
-    return raw
 
 
 def build_app_config(raw: Dict[str, Any]) -> AppConfig:
@@ -120,7 +107,6 @@ def build_app_config(raw: Dict[str, Any]) -> AppConfig:
 
 def load_config(path: Optional[str] = None) -> AppConfig:
     raw = load_yaml_config(path)
-    raw = apply_env_overrides(raw)
     return build_app_config(raw)
 
 

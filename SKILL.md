@@ -24,17 +24,13 @@ The LLM Proxy is a FastAPI-based server that:
 ```bash
 cd /src/llmproxy
 
-# Set environment variables
-export LLMPROXY_LLM_BASE_URL=http://127.0.0.1:8080
-export LLMPROXY_EMBED_BASE_URL=http://127.0.0.1:8081
-export LLMPROXY_RERANK_BASE_URL=http://127.0.0.1:8082
-export LLMPROXY_PORT=8000
-
-# Start the proxy
-uv run python -m src.llmproxy.main
+# Edit config.yaml or use your own config file
+uv run python -m src.llmproxy.main -c /path/to/config.yaml
 ```
 
 **uv location:** `~/.local/bin/uv` or `~/.cargo/bin/uv` (if installed via cargo)
+
+Configuration is done entirely through YAML config files. No environment variables are required.
 
 ## Backend-Based Global Locking
 

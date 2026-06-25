@@ -43,7 +43,7 @@ It also adds important production features that llama-server alone does not prov
 - **Configurable Logging**: Three levels (`info`, `debug`, `trace`) with intelligent truncation of large prompts/documents.
 - **Router-Mode Optimized**: Generous timeouts and graceful handling of slow model loading (20–35 s on first request to a model in router mode).
 - **Accurate Error Propagation**: All backend HTTP status codes (400, 429, 500, 504, etc.) are forwarded correctly to the client.
-- **CLI Configuration**: Use `-c/--config` flag to specify config file path (replaces `LLMPROXY_CONFIG` env var)
+- **CLI Configuration**: Use `-c/--config` flag to specify config file path
 
 ## Architecture
 
@@ -135,50 +135,15 @@ TEI rerank results: `index = item.get("index", i)` preserves backend's original 
 cd llmproxy
 uv sync
 
-export LLMPROXY_LLM_BASE_URL=http://127.0.0.1:8080
-export LLMPROXY_EMBED_BASE_URL=http://127.0.0.1:8081
-export LLMPROXY_RERANK_BASE_URL=http://127.0.0.1:8082
-export LLMPROXY_PORT=8000
-
+# Edit config.yaml or use your own config file
 uv run python -m src.llmproxy.main -c /path/to/config.yaml
 ```
 
+Configuration is done entirely through YAML config files. No environment variables are required.
+
 ## Configuration Reference
 
-### Required Environment Variables
-
-| Variable                              | Description                                      | Example                     |
-|---------------------------------------|--------------------------------------------------|-----------------------------|
-| `LLMPROXY_LLM_BASE_URL`            | Main LLM server (chat/completions/models)        | `http://127.0.0.1:8080`     |
-| `LLMPROXY_EMBED_BASE_URL`     | Dedicated embeddings server                      | `http://127.0.0.1:8081`     |
-| `LLMPROXY_RERANK_BASE_URL`       | Reranker / TEI server                            | `http://127.0.0.1:8082`     |
-
-### Optional but Recommended
-
-| Variable                        | Description                                                                 | Default     |
-|---------------------------------|-----------------------------------------------------------------------------|-------------|
-| `LLMPROXY_PORT`                 | Listen port                                                                 | `8000`      |
-| `LLMPROXY_HOST`                 | Listen address                                                              | `0.0.0.0`   |
-| `LLMPROXY_LOG_LEVEL`            | `info` / `debug` / `trace`                                                  | `info`      |
-| `LLMPROXY_API_KEY`              | Enable API key protection on OpenAI endpoints when set                      | —           |
-| `LLMPROXY_LOCKED_ERROR`         | If `true`, return 503 immediately when lock held; if `false`, block until acquired | `false`     |
-| `-c, --config PATH`             | Path to `config.yaml` for global locks and main configuration               | —           |
-| `LLMPROXY_LOCK_SCRIPT`          | Python (.py) / Shell (.sh/.bash) / Bash command executed during locked requests | —           |
-
-### Backend Timeouts (in seconds)
-
-| Variable                              | Description                                      | Default |
-|---------------------------------------|--------------------------------------------------|---------|
-| `LLMPROXY_LLM_TIMEOUT`             | Connection timeout for LLM backend               | `30`    |
-| `LLMPROXY_LLM_READ_TIMEOUT`        | Read timeout for LLM backend (streaming +210s)   | `90`    |
-| `LLMPROXY_RERANK_TIMEOUT`        | Connection timeout for reranker backend          | `60`    |
-| `LLMPROXY_RERANK_READ_TIMEOUT`   | Read timeout for reranker backend                | `120`   |
-| `LLMPROXY_EMBED_TIMEOUT`      | Connection timeout for embeddings backend        | `30`    |
-| `LLMPROXY_EMBED_READ_TIMEOUT` | Read timeout for embeddings backend              | `60`    |
-
-Connection timeout is time to establish connection. Read timeout is time to wait for response data (streaming adds extra time).
-
-Backend-specific API keys (`LLMPROXY_LLM_API_KEY`, etc.) are also supported.
+All configuration is done through YAML config files. See the example config below.
 
 ### Global Locks Example (backend-based, `config.yaml`)
 
@@ -233,8 +198,6 @@ backends:
 - **`locked_error: false`** — if `true`, returns 503 immediately when lock is held; if `false`, blocks until lock acquired
 - **`backends.lock_script: ""`** — optional default Python/shell/bash command for all backends (set at `backends:` level)
 - **Per-backend `lock_script`** — override the default for a specific backend (set at `backends.llm.lock_script`, etc.)
-- **Lock script priority**: per-backend `lock_script` > `backends.lock_script` > `global_lock.lock_script` (legacy)
-- **Environment variable fallback**: `LLMPROXY_LOCK_SCRIPT` sets default for all backends when no config file provided
 
 **Legacy path-based locking** (older format, still supported):
 
@@ -290,10 +253,14 @@ def handle_request(request_data):
     print(f"Request to {request_data.get('path')}")
 ```
 
-**Bash commands (raw command string):**
-- If `LLMPROXY_LOCK_SCRIPT` is not a file path, it's treated as a raw bash command
+**Bash commands (raw command string in config.yaml):**
+- If `lock_script` is not a file path, it's treated as a raw bash command
 - Same environment variables as shell scripts
-- Example: `LLMPROXY_LOCK_SCRIPT="echo 'Lock acquired' >> /var/log/llmproxy.lock"`
+- Example in config.yaml:
+```yaml
+backends:
+  lock_script: "echo 'Lock acquired' >> /var/log/llmproxy.lock"
+```
 
 **Mode detection:**
 1. If path ends with `.py` → Python script
