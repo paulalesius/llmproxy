@@ -2,345 +2,224 @@
 
 ![Banner](banner.jpg)
 
-A FastAPI-based proxy server that provides OpenAI-compatible and TEI (Text Embeddings Inference) compatible endpoints for llama-server instances.
+**A lightweight, production-oriented FastAPI proxy that provides a unified OpenAI-compatible and TEI-compatible API surface in front of multiple specialized llama-server instances.**
 
 ## Purpose
 
-This proxy solves two main problems:
+LLM Proxy solves the common problem of having **separate backends** for different LLM capabilities:
 
-1. **Unified access point**: Route requests to different llama-server instances (LLM on port 8080, reranker on port 8082, embeddings on port 8081) through a single endpoint
-2. **API compatibility**: Provide proper OpenAI and TEI API shapes that clients expect, with Hindsight compatibility shims
+- One llama-server for chat & completions (router mode)
+- One dedicated llama-server for embeddings
+- One llama-server for reranking (TEI-compatible)
 
-## Features
+Instead of clients talking to three different ports and dealing with inconsistent APIs, LLM Proxy offers a single, clean endpoint that behaves exactly like the official OpenAI and TEI APIs.
 
-- **OpenAI-compatible endpoints**: `/v1/models`, `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`
-  - Full streaming support (SSE) for chat and completions
-  - Proper HTTP status code forwarding (400, 429, 500, etc.)
-  - Uses `model="default"` for completions when model name is missing
-  - **Dedicated embeddings server** (separate from LLM, configurable via `LLMPROXY_OAIEMBEDDINGS_BASE_URL`)
+It also adds important production features that llama-server alone does not provide out of the box:
+- Request serialization / global locks
+- Optional API key authentication
+- Pre- and post-request Python hooks
+- Proper streaming, error status code forwarding, and Hindsight compatibility
 
-- **TEI-compatible rerank endpoint**: `/v1/rerank`, `/rerank`
-  - Full TEI spec compliance with proper index preservation
-  - Hindsight API compatibility (`texts` → `documents`, `return_text` → `return_documents`)
-  - High timeouts (120s read) for large document batches (1500+ docs)
-  - Uses `bge-reranker-v2-m3` model by default
+## Core Features
 
-- **Router-mode aware**: Handles llama-server's slow model loading (20-35 seconds) with appropriate timeouts
+### OpenAI Compatibility
+- `GET /v1/models` and `GET /v1/models/{id}`
+- `POST /v1/chat/completions` — full streaming (SSE) support
+- `POST /v1/completions` — streaming + automatic `model="default"` fallback
+- `POST /v1/embeddings` — routed to a **dedicated embeddings server**
 
-- **Global locks**: Optional serialization of chat/embeddings requests to prevent concurrent overload
-  - Enabled via `LLMPROXY_LOCK_CONFIG` pointing to YAML config file
-  - Returns `503 Service Unavailable` with `Retry-After` header when lock is held (in `locked_error` mode)
-  - Rerank, models, and health endpoints run freely without locks
+### TEI Rerank Compatibility
+- `POST /v1/rerank` and `POST /rerank`
+- Full TEI response format with correct `index` preservation (original document positions, not re-sorted)
+- Hindsight API compatibility shims:
+  - `texts` → `documents`
+  - `return_text` → `return_documents`
+  - Automatic `model="reranker"` default
 
-- **Configurable logging**: `LLMPROXY_LOG_LEVEL` (info/debug/trace) for request/response inspection
+### Production-Grade Capabilities
+- **Global Locks** (optional): Serialize heavy endpoints (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`) so they never run concurrently. Prevents backend overload. Can return `503` immediately or block and wait.
+- **API Key Authentication** (optional): Protect all OpenAI endpoints with a simple Bearer token.
+- **Request Hooks**: Run custom Python code before and after every request (after lock acquisition).
+- **Configurable Logging**: Three levels (`info`, `debug`, `trace`) with intelligent truncation of large prompts/documents.
+- **Router-Mode Optimized**: Generous timeouts and graceful handling of slow model loading (20–35 s on first request to a model in router mode).
+- **Accurate Error Propagation**: All backend HTTP status codes (400, 429, 500, 504, etc.) are forwarded correctly to the client.
 
-## Vibe-Coded
+## Architecture
 
-This project was built for personal use with a "vibe-coded" approach — it works for the intended use cases (local RAG, Hindsight, OpenAI-compatible clients) but may not be production-grade for all edge cases. The code is functional and tested, but not exhaustively reviewed or optimized for every possible scenario.
+```
+                     ┌─────────────────────────────┐
+                     │         LLM Proxy           │
+                     │   (FastAPI on :8000/4001)   │
+                     └──────────────┬──────────────┘
+                                    │
+          ┌─────────────────────────┼─────────────────────────┐
+          │                         │                         │
+          ▼                         ▼                         ▼
+   ┌──────────────┐        ┌────────────────┐        ┌──────────────┐
+   │  LLM Server  │        │ Embeddings     │        │ Reranker     │
+   │  (llama.cpp) │        │ Server         │        │ Server       │
+   │   :8080      │        │   :8081        │        │   :8082      │
+   └──────────────┘        └────────────────┘        └──────────────┘
+   chat / completions      embeddings only           /rerank only
+   models
+```
 
-**Use it as-is, don't over-analyze the code.** If it works for your needs, great. If you need to extend it, the architecture is clean enough to add features.
+**Internal components**:
+- `OpenAIComponent` — handles chat, completions, models + streaming logic
+- `EmbeddingsComponent` — thin proxy to dedicated embeddings backend
+- `TEIComponent` — rerank proxy with format normalization and index preservation
+- `GlobalLockMiddleware` + `APIKeyMiddleware` + `LoggingMiddleware`
 
+All components use `httpx.AsyncClient` with carefully tuned timeouts.
 
----
-
-**Note:** This project is *vibe-coded* for personal use. The code works, but don't expect it to be pretty or fully documented. I just needed llmproxy to do its job.
-
----
-## Installation
+## Quick Start
 
 ```bash
-cd /src/llmproxy
-uv sync  # or: pip install -e .
-```
+cd llmproxy
+uv sync
 
-## Configuration
-
-Set these environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LLMPROXY_OAILLM_BASE_URL` | `http://127.0.0.1:8080` | LLM llama-server URL |
-| `LLMPROXY_OAILLM_API_KEY` | `` | API key for LLM backend (optional) |
-| `LLMPROXY_OAIEMBEDDINGS_BASE_URL` | `http://127.0.0.1:8081` | Dedicated embeddings server URL |
-| `LLMPROXY_OAIEMBEDDINGS_API_KEY` | `` | API key for embeddings backend (optional) |
-| `LLMPROXY_TEIRERANKER_BASE_URL` | `http://127.0.0.1:8082` | Reranker llama-server URL |
-| `LLMPROXY_TEIRERANKER_API_KEY` | `` | API key for reranker backend (optional) |
-| `LLMPROXY_HOST` | `0.0.0.0` | Proxy listen address |
-| `LLMPROXY_PORT` | `8000` | Proxy listen port |
-| `LLMPROXY_API_KEY` | `` | API key for proxy authentication (enables when set) |
-| `LLMPROXY_LOG_LEVEL` | `info` | Log level: `info`, `debug`, or `trace` |
-| `LLMPROXY_LOCK_CONFIG` | `` | Path to YAML config for global locks (optional) |
-| `LLMPROXY_REQUEST_PRE_PYSCRIPT` | `` | Path to Python script to run before each request (after lock) |
-| `LLMPROXY_REQUEST_POST_PYSCRIPT` | `` | Path to Python script to run after each request (before lock release) |
-
-**Log levels:**
-- **info**: Basic logs (endpoints, status codes, timing)
-- **debug**: Full requests/responses with headers and truncated body content
-- **trace**: Everything including full text content (prompts, documents, etc.)
-
-**Global lock:**
-- When enabled via `LLMPROXY_LOCK_CONFIG`, serializes requests based on YAML configuration
-- Prevents concurrent requests from overwhelming llama-server
-- Other endpoints (`/v1/rerank`, `/v1/models`, `/health`) run freely without locks
-- Returns `503 Service Unavailable` with `Retry-After` header when lock is held (in `locked_error` mode)
-
-Lock config format (YAML):
-```yaml
-global_lock:
-  enabled: true
-  locked_error: true  # Return 503 instead of blocking
-  /v1/chat/completions:
-    locks: []
-  /v1/embeddings:
-    locks: []
-```
-
-### Pre/Post Request Python Script Hooks
-
-You can run custom Python scripts before and after each proxied request. Scripts are loaded at startup and executed for every request that goes through the proxy (after lock acquisition for pre, before lock release for post).
-
-**Script format:**
-
-Scripts can either:
-1. Define a `handle_request(request_data)` function that receives request information
-2. Run as plain code (executed on import)
-
-**Request data structure:**
-
-When `handle_request()` is called, it receives a dict with:
-- `method`: HTTP method (GET, POST, etc.)
-- `path`: Request path (e.g., `/v1/chat/completions`)
-- `url`: Full URL string
-- `headers`: Dict of request headers
-- `response_status`: (post-script only) HTTP response status code
-
-**Example script with handle_request():**
-
-```python
-# /path/to/pre_hook.py
-def handle_request(request_data):
-    print(f"Request to {request_data['path']} with method {request_data['method']}")
-    # Your custom logic here
-    return "processed"
-```
-
-**Example script as plain code:**
-
-```python
-# /path/to/post_hook.py
-import os
-
-# Runs on import
-print("Post-hook loaded!")
-
-# Can also define handle_request
-def handle_request(request_data):
-    # Log response status
-    if request_data.get('response_status') >= 400:
-        print(f"Error response: {request_data['response_status']}")
-```
-
-**Enable scripts:**
-
-```bash
-export LLMPROXY_REQUEST_PRE_PYSCRIPT=/path/to/pre_hook.py
-export LLMPROXY_REQUEST_POST_PYSCRIPT=/path/to/post_hook.py
-uv run python -m src.llmproxy.main
-```
-
-Scripts are executed synchronously during request processing. If a script throws an exception, the error is logged but the request continues.
-
-The systemd service defaults to `debug` level.
-
-### Example: Enable debug logging
-```bash
-export LLMPROXY_LOG_LEVEL=debug
-uv run python -m src.llmproxy.main
-```
-
-### Example: Enable trace logging (full text content)
-```bash
-export LLMPROXY_LOG_LEVEL=trace
-uv run python -m src.llmproxy.main
-```
-
-### Example: Enable API key authentication
-```bash
-export LLMPROXY_PORT=8000
-export LLMPROXY_API_KEY=min-hemliga-nyckel
-uv run python -m src.llmproxy.main
-```
-
-When `LLMPROXY_API_KEY` is set, the proxy requires API key authentication on all OpenAI endpoints. Send the API key in the `Authorization` header:
-
-- **Bearer token format**: `Authorization: Bearer min-he...kel`
-- **Raw format**: `Authorization: min-hemliga-nyckel`
-
-Without a valid API key, requests return `401 Unauthorized`.
-
-Note: TEI endpoints (`/v1/rerank`, `/v1/info`) and health are excluded from API key auth.
-
-Debug log example:
-```
-2026-06-23 22:07:19,173 - src.llmproxy.components.tei - DEBUG - REQUEST [POST /rerank]: headers={}, body={"model":"reranker","query":"test query...","documents":["[20 chars]","[20 chars]"]}
-2026-06-23 22:07:19,189 - src.llmproxy.components.tei - DEBUG - RESPONSE [/rerank] 200 (0.02s): body={"model":"reranker","results":[{"index":0,"score":-5.34}]}
-```
-
-## Usage
-
-### Start the proxy
-
-```bash
 export LLMPROXY_OAILLM_BASE_URL=http://127.0.0.1:8080
+export LLMPROXY_OAIEMBEDDINGS_BASE_URL=http://127.0.0.1:8081
 export LLMPROXY_TEIRERANKER_BASE_URL=http://127.0.0.1:8082
 export LLMPROXY_PORT=8000
 
 uv run python -m src.llmproxy.main
 ```
 
-Or use the systemd service:
+## Configuration Reference
 
-```bash
-sudo systemctl enable --now llmproxy
-sudo systemctl status llmproxy
+### Required Environment Variables
+
+| Variable                              | Description                                      | Example                     |
+|---------------------------------------|--------------------------------------------------|-----------------------------|
+| `LLMPROXY_OAILLM_BASE_URL`            | Main LLM server (chat/completions/models)        | `http://127.0.0.1:8080`     |
+| `LLMPROXY_OAIEMBEDDINGS_BASE_URL`     | Dedicated embeddings server                      | `http://127.0.0.1:8081`     |
+| `LLMPROXY_TEIRERANKER_BASE_URL`       | Reranker / TEI server                            | `http://127.0.0.1:8082`     |
+
+### Optional but Recommended
+
+| Variable                        | Description                                                                 | Default     |
+|---------------------------------|-----------------------------------------------------------------------------|-------------|
+| `LLMPROXY_PORT`                 | Listen port                                                                 | `8000`      |
+| `LLMPROXY_HOST`                 | Listen address                                                              | `0.0.0.0`   |
+| `LLMPROXY_LOG_LEVEL`            | `info` / `debug` / `trace`                                                  | `info`      |
+| `LLMPROXY_API_KEY`              | Enable API key protection on OpenAI endpoints when set                      | —           |
+| `LLMPROXY_LOCK_CONFIG`          | Path to `config.yaml` for global locks                                      | —           |
+| `LLMPROXY_REQUEST_PRE_PYSCRIPT` | Path to Python script executed before each request                          | —           |
+| `LLMPROXY_REQUEST_POST_PYSCRIPT`| Path to Python script executed after each request                           | —           |
+
+Backend-specific API keys (`LLMPROXY_OAILLM_API_KEY`, etc.) are also supported.
+
+### Global Locks Example (`config.yaml`)
+
+```yaml
+global_lock:
+  enabled: true
+  locked_error: false          # true = return 503 immediately instead of waiting
+  /v1/chat/completions:
+    locks:
+      - /v1/completions
+      - /v1/embeddings
+  /v1/embeddings:
+    locks:
+      - /v1/chat/completions
+      - /v1/completions
+  /v1/completions:
+    locks:
+      - /v1/chat/completions
+      - /v1/embeddings
 ```
 
-### OpenAI API examples
+Endpoints not listed (`/v1/rerank`, `/v1/models`, `/health`, `/info`) always run without locks.
 
-**List models:**
-```bash
-curl http://localhost:8000/v1/models
-```
+### Pre/Post Request Hooks
 
-**Chat completion (non-streaming):**
+Hooks are regular Python files. They can either:
+
+1. Define a `handle_request(request_data)` function, or
+2. Contain top-level code that runs on import.
+
+`request_data` contains: `method`, `path`, `url`, `headers`, and (for post-hook) `response_status`.
+
+## Usage Examples
+
+### Chat Completions (streaming)
+
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -N -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen3.6-dense-mtp-custom",
-    "messages": [{"role": "user", "content": "Say hi"}],
-    "max_tokens": 50
+    "messages": [{"role": "user", "content": "Write a haiku about programming."}],
+    "stream": true,
+    "max_tokens": 60
   }'
 ```
 
-**Chat completion (streaming):**
+### Rerank (Hindsight-compatible format)
+
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/rerank \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen3.6-dense-mtp-custom",
-    "messages": [{"role": "user", "content": "Say hi"}],
-    "stream": true
+    "query": "machine learning best practices",
+    "texts": [
+      "Always validate your models on a hold-out set.",
+      "Feature engineering is often more important than model choice.",
+      "The quick brown fox jumps over the lazy dog."
+    ],
+    "top_n": 2,
+    "return_text": true
   }'
 ```
 
-**Completions (uses model='default' if not specified):**
-```bash
-curl -X POST http://localhost:8000/v1/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "Once upon a time",
-    "max_tokens": 20
-  }'
+**Response** (note that `index` refers to the **original** position in your input array):
+
+```json
+[
+  {"index": 1, "score": 0.87, "document": "Feature engineering is often more important than model choice."},
+  {"index": 0, "score": 0.79, "document": "Always validate your models on a hold-out set."}
+]
 ```
 
-**Embeddings:**
+### Embeddings
+
 ```bash
 curl -X POST http://localhost:8000/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{
     "model": "bge-m3",
-    "input": "test document"
+    "input": ["First document", "Second document"]
   }'
 ```
 
-### TEI Rerank examples
+## Deployment (systemd)
 
-**Rerank (TEI format with bge-reranker-v2-m3):**
-```bash
-curl -X POST http://localhost:8000/v1/rerank \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "bge-reranker-v2-m3",
-    "query": "machine learning",
-    "documents": ["ML is great", "ML is hard", "ML is easy"],
-    "top_n": 2,
-    "return_documents": true
-  }'
-```
+A ready-to-use unit file is included (`llmproxy.service`).
 
-**Hindsight-compatible format (simplified):**
-```bash
-curl -X POST http://localhost:8000/v1/rerank \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "machine learning",
-    "texts": ["ML is great", "ML is hard"],
-    "return_text": false
-  }'
-```
-
-Response format:
-```json
-[
-  {"index": 0, "score": 0.92, "document": "ML is great"},
-  {"index": 2, "score": 0.78, "document": "ML is easy"}
-]
-```
-
-Note: `index` preserves the original document position (not sorted position), so you can map back to your input array.
-
-## Testing
-
-Run integration tests:
+Recommended setup:
 
 ```bash
-cd /src/llmproxy
-bash test.sh
+sudo cp llmproxy.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now llmproxy
+sudo systemctl status llmproxy
 ```
 
-This tests:
-- Health endpoint
-- TEI rerank (full and Hindsight formats with bge-reranker-v2-m3)
-- OpenAI models list and detail
-- Chat completions (sync and streaming)
-- Completions (with auto-model selection)
-- Embeddings (with bge-m3)
-- Global locks (serialization, 503 responses, endpoint exclusions)
+The service file already contains sensible defaults and runs `uv sync` on start.
 
-Tests are designed for router-mode llama-server, so they accept 500 (model loading) and 404 (model not loaded) as valid proxy behavior.
+## Design Philosophy & Known Behaviors
 
-### API Key Authentication Tests
-
-Run API key authentication tests:
-
-```bash
-cd /src/llmproxy
-bash test_api_key.sh
-```
-
-This tests:
-- Request without API key (expect 401)
-- Request with wrong API key (expect 401)
-- Request with correct API key as Bearer token (expect 200)
-- Request with correct API key as raw value (expect 200)
-
-## Architecture
-
-- `src/llmproxy/main.py`: FastAPI app with route definitions
-- `src/llmproxy/components/openai.py`: OpenAI endpoint proxy with streaming support (chat/completions)
-- `src/llmproxy/components/embeddings.py`: Dedicated embeddings proxy (separate from LLM server)
-- `src/llmproxy/components/tei.py`: TEI rerank proxy with Hindsight compatibility
-
-All components use `httpx.AsyncClient` with configurable timeouts, proper error handling, and logging based on `LLMPROXY_LOG_LEVEL`.
-
-## Known behaviors
-
-- **Router-mode model loading**: First request to an unloaded model can take 20-35 seconds. Subsequent requests are fast.
-- **404 on `/v1/models/{id}`**: llama-server router mode returns 404 for individual model queries if the model isn't loaded. The proxy forwards this correctly.
-- **500 on completions/embeddings**: May occur if the model needs to load. The proxy forwards the error with proper status code.
-- **Index preservation**: TEI rerank results preserve original document indices, not sorted positions.
+- **Transparency first**: The proxy tries hard to be invisible. Status codes, streaming format, and error shapes from the backends are preserved.
+- **Router mode is first-class**: First request to an unloaded model can take 20–35 seconds. Timeouts and error handling are tuned for this.
+- **Index correctness in rerank** is non-negotiable — clients must be able to map results back to their original documents.
+- **No magic**: If the backend returns 500 because a model is still loading, the proxy returns 500. This is the correct and expected behavior.
+- The project was built with a pragmatic, "vibe-coded but functional" approach for real internal use (RAG pipelines, Hindsight, local OpenAI-compatible clients).
 
 ## License
 
-MIT
+Apache License 2.0
+
+---
+
+**LLM Proxy** — One clean API in front of many specialized LLM backends.
