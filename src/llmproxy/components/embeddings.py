@@ -8,6 +8,7 @@ import logging
 import json
 from typing import Optional, Tuple, Any
 import httpx
+from . import config
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class EmbeddingsComponent:
         # Embeddings are typically fast, but allow for batch processing
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
-            timeout=httpx.Timeout(30.0, read=60.0)
+            timeout=httpx.Timeout(config.OAIEMBEDDINGS_TIMEOUT, read=config.OAIEMBEDDINGS_READ_TIMEOUT)
         )
         
         logger.info(f"EmbeddingsComponent initialized: base_url={self.base_url}, api_key={'*' * 8 if self.api_key else '(none)'}")

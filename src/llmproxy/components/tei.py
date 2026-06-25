@@ -9,6 +9,7 @@ import json
 from typing import List, Optional, Any
 from pydantic import BaseModel
 import httpx
+from . import config
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ class TEIComponent:
         # Set timeout to 60s for large batches (Hindsight can send 1500+ docs)
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
-            timeout=httpx.Timeout(60.0, read=120.0)
+            timeout=httpx.Timeout(config.TEIRERANKER_TIMEOUT, read=config.TEIRERANKER_READ_TIMEOUT)
         )
         
         logger.info(f"TEIComponent initialized: base_url={self.base_url}, api_key={'*' * 8 if self.api_key else '(none)'}")

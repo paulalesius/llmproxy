@@ -32,6 +32,14 @@ Environment=LLMPROXY_LOCK_CONFIG=/etc/llmproxy/config.yaml
 # Lock script (optional) - supports Python (.py) or shell (.sh/.bash)
 Environment=LLMPROXY_LOCK_SCRIPT=/etc/llmproxy/hook.py
 
+# Backend timeouts (in seconds)
+Environment=LLMPROXY_OAILLM_TIMEOUT=30
+Environment=LLMPROXY_OAILLM_READ_TIMEOUT=90
+Environment=LLMPROXY_TEIRERANKER_TIMEOUT=60
+Environment=LLMPROXY_TEIRERANKER_READ_TIMEOUT=120
+Environment=LLMPROXY_OAIEMBEDDINGS_TIMEOUT=30
+Environment=LLMPROXY_OAIEMBEDDINGS_READ_TIMEOUT=60
+
 # Setup and start
 ExecStartPre=/home/noname/.local/bin/uv sync
 ExecStart=/src/llmproxy/.venv/bin/python -m src.llmproxy.main

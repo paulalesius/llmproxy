@@ -9,6 +9,7 @@ import json
 from typing import Optional, Tuple, Any
 from fastapi.responses import StreamingResponse, JSONResponse
 import httpx
+from . import config
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +69,10 @@ class OpenAIComponent:
         )
         self.api_key = os.environ.get("LLMPROXY_OAILLM_API_KEY", "")
         
-        # Router-mode: model loading can take 20s+, set longer timeouts
+        # Router-mode: model loading can take 20s+, use config timeouts
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
-            timeout=httpx.Timeout(30.0, read=90.0)
+            timeout=httpx.Timeout(config.OAILLM_TIMEOUT, read=config.OAILLM_READ_TIMEOUT)
         )
         
         logger.info(f"OpenAIComponent initialized: base_url={self.base_url}, api_key={'*' * 8 if self.api_key else '(none)'}")
@@ -159,7 +160,7 @@ class OpenAIComponent:
                     "/v1/chat/completions",
                     json=body,
                     headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
-                    timeout=httpx.Timeout(30.0, read=300.0)
+                    timeout=httpx.Timeout(config.OAILLM_TIMEOUT, read=config.OAILLM_READ_TIMEOUT + 210)
                 )
                 resp.raise_for_status()
 
@@ -214,7 +215,7 @@ class OpenAIComponent:
                     "/v1/completions",
                     json=body,
                     headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
-                    timeout=httpx.Timeout(30.0, read=120.0)
+                    timeout=httpx.Timeout(config.OAILLM_TIMEOUT, read=config.OAILLM_READ_TIMEOUT + 30)
                 )
                 resp.raise_for_status()
                 
