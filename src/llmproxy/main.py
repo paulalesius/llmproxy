@@ -13,6 +13,7 @@ import yaml
 from .components.tei import TEIComponent
 from .components.openai import OpenAIComponent
 from .components.embeddings import EmbeddingsComponent
+from .script_loader import load_script_from_path, execute_hook
 
 # API key configuration
 # API key protection is enabled when LLMPROXY_API_KEY is set
@@ -40,10 +41,18 @@ logger = logging.getLogger(__name__)
 # If not set, runs without any locks (disabled by default)
 LOCK_CONFIG_PATH = os.environ.get("LLMPROXY_LOCK_CONFIG")
 
+# Pre/post request Python script hooks
+REQUEST_PRE_PYSCRIPT = os.environ.get("LLMPROXY_REQUEST_PRE_PYSCRIPT", "")
+REQUEST_POST_PYSCRIPT = os.environ.get("LLMPROXY_REQUEST_POST_PYSCRIPT", "")
+
 # Lock state - initialized in lifespan
 lock_config: Optional[dict] = None
 group_locks: Dict[str, asyncio.Lock] = {}
 path_to_group: Dict[str, str] = {}
+
+# Script hooks - initialized in lifespan
+pre_script_hook: Optional[dict] = None
+post_script_hook: Optional[dict] = None
 
 
 def load_lock_config():
@@ -98,14 +107,49 @@ def load_lock_config():
                 else:
                     logger.info(f"Endpoint {path} has no locks (runs freely)")
             elif isinstance(config_entry, str):
-                # Simple format: path -> group_name (legacy)
-                logger.info(f"Endpoint {path} -> lock group '{config_entry}'")
+                locks = [config_entry]
+                logger.info(f"Endpoint {path} locks: {locks}")
+            else:
+                logger.info(f"Endpoint {path} has no locks (runs freely)")
         
         logger.info(f"Global lock enabled with {len(group_locks)} locks")
         
     except Exception as e:
         logger.error(f"Failed to load lock config: {e}")
-        lock_config = {"enabled": False}
+
+def load_script_hooks():
+    """Load pre/post request Python script hooks."""
+    global pre_script_hook, post_script_hook
+    
+    # Load pre script
+    if REQUEST_PRE_PYSCRIPT:
+        pre_script_hook = load_script_from_path(REQUEST_PRE_PYSCRIPT)
+        if pre_script_hook["error"]:
+            logger.warning(f"Pre-script hook: {pre_script_hook['error']}")
+        else:
+            logger.info(f"Pre-script hook loaded from {REQUEST_PRE_PYSCRIPT}")
+            if pre_script_hook["handle_request"]:
+                logger.info("  - has handle_request() function")
+            else:
+                logger.info("  - runs as plain script on import")
+    else:
+        pre_script_hook = None
+        logger.info("Pre-script hook disabled (LLMPROXY_REQUEST_PRE_PYSCRIPT not set)")
+    
+    # Load post script
+    if REQUEST_POST_PYSCRIPT:
+        post_script_hook = load_script_from_path(REQUEST_POST_PYSCRIPT)
+        if post_script_hook["error"]:
+            logger.warning(f"Post-script hook: {post_script_hook['error']}")
+        else:
+            logger.info(f"Post-script hook loaded from {REQUEST_POST_PYSCRIPT}")
+            if post_script_hook["handle_request"]:
+                logger.info("  - has handle_request() function")
+            else:
+                logger.info("  - runs as plain script on import")
+    else:
+        post_script_hook = None
+        logger.info("Post-script hook disabled (LLMPROXY_REQUEST_POST_PYSCRIPT not set)")
 
 
 class GlobalLockMiddleware(BaseHTTPMiddleware):
@@ -160,7 +204,37 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
                     await lock.acquire()
                 
                 try:
+                    # Run pre-script hook (after lock acquired, before request)
+                    if pre_script_hook:
+                        request_data = {
+                            "method": request.method,
+                            "path": request.url.path,
+                            "url": str(request.url),
+                            "headers": dict(request.headers),
+                        }
+                        result = execute_hook(pre_script_hook, request_data)
+                        if not result["success"]:
+                            logger.warning(f"Pre-script hook failed: {result['error']}")
+                        elif result["result"] is not None:
+                            logger.debug(f"Pre-script hook returned: {result['result']}")
+                    
                     response = await call_next(request)
+                    
+                    # Run post-script hook (after request, before lock release)
+                    if post_script_hook:
+                        request_data = {
+                            "method": request.method,
+                            "path": request.url.path,
+                            "url": str(request.url),
+                            "headers": dict(request.headers),
+                            "response_status": response.status_code,
+                        }
+                        result = execute_hook(post_script_hook, request_data)
+                        if not result["success"]:
+                            logger.warning(f"Post-script hook failed: {result['error']}")
+                        elif result["result"] is not None:
+                            logger.debug(f"Post-script hook returned: {result['result']}")
+                    
                     return response
                 finally:
                     # Release all locks in reverse order
@@ -175,7 +249,37 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
                     await lock.acquire()
                 
                 try:
+                    # Run pre-script hook (after lock acquired, before request)
+                    if pre_script_hook:
+                        request_data = {
+                            "method": request.method,
+                            "path": request.url.path,
+                            "url": str(request.url),
+                            "headers": dict(request.headers),
+                        }
+                        result = execute_hook(pre_script_hook, request_data)
+                        if not result["success"]:
+                            logger.warning(f"Pre-script hook failed: {result['error']}")
+                        elif result["result"] is not None:
+                            logger.debug(f"Pre-script hook returned: {result['result']}")
+                    
                     response = await call_next(request)
+                    
+                    # Run post-script hook (after request, before lock release)
+                    if post_script_hook:
+                        request_data = {
+                            "method": request.method,
+                            "path": request.url.path,
+                            "url": str(request.url),
+                            "headers": dict(request.headers),
+                            "response_status": response.status_code,
+                        }
+                        result = execute_hook(post_script_hook, request_data)
+                        if not result["success"]:
+                            logger.warning(f"Post-script hook failed: {result['error']}")
+                        elif result["result"] is not None:
+                            logger.debug(f"Post-script hook returned: {result['result']}")
+                    
                     return response
                 finally:
                     # Release all locks in reverse order
@@ -228,6 +332,9 @@ async def lifespan(app: FastAPI):
     """Manage startup and shutdown lifecycle."""
     # Load and initialize global lock configuration
     load_lock_config()
+    
+    # Load pre/post request script hooks
+    load_script_hooks()
     
     # Startup
     app.state.tei = TEIComponent()

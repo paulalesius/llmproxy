@@ -70,6 +70,8 @@ Set these environment variables:
 | `LLMPROXY_API_KEY` | `` | API key for proxy authentication (enables when set) |
 | `LLMPROXY_LOG_LEVEL` | `info` | Log level: `info`, `debug`, or `trace` |
 | `LLMPROXY_LOCK_CONFIG` | `` | Path to YAML config for global locks (optional) |
+| `LLMPROXY_REQUEST_PRE_PYSCRIPT` | `` | Path to Python script to run before each request (after lock) |
+| `LLMPROXY_REQUEST_POST_PYSCRIPT` | `` | Path to Python script to run after each request (before lock release) |
 
 **Log levels:**
 - **info**: Basic logs (endpoints, status codes, timing)
@@ -92,6 +94,61 @@ global_lock:
   /v1/embeddings:
     locks: []
 ```
+
+### Pre/Post Request Python Script Hooks
+
+You can run custom Python scripts before and after each proxied request. Scripts are loaded at startup and executed for every request that goes through the proxy (after lock acquisition for pre, before lock release for post).
+
+**Script format:**
+
+Scripts can either:
+1. Define a `handle_request(request_data)` function that receives request information
+2. Run as plain code (executed on import)
+
+**Request data structure:**
+
+When `handle_request()` is called, it receives a dict with:
+- `method`: HTTP method (GET, POST, etc.)
+- `path`: Request path (e.g., `/v1/chat/completions`)
+- `url`: Full URL string
+- `headers`: Dict of request headers
+- `response_status`: (post-script only) HTTP response status code
+
+**Example script with handle_request():**
+
+```python
+# /path/to/pre_hook.py
+def handle_request(request_data):
+    print(f"Request to {request_data['path']} with method {request_data['method']}")
+    # Your custom logic here
+    return "processed"
+```
+
+**Example script as plain code:**
+
+```python
+# /path/to/post_hook.py
+import os
+
+# Runs on import
+print("Post-hook loaded!")
+
+# Can also define handle_request
+def handle_request(request_data):
+    # Log response status
+    if request_data.get('response_status') >= 400:
+        print(f"Error response: {request_data['response_status']}")
+```
+
+**Enable scripts:**
+
+```bash
+export LLMPROXY_REQUEST_PRE_PYSCRIPT=/path/to/pre_hook.py
+export LLMPROXY_REQUEST_POST_PYSCRIPT=/path/to/post_hook.py
+uv run python -m src.llmproxy.main
+```
+
+Scripts are executed synchronously during request processing. If a script throws an exception, the error is logged but the request continues.
 
 The systemd service defaults to `debug` level.
 
