@@ -33,7 +33,7 @@ def llmproxy_server():
     
     # Start server
     proc = subprocess.Popen(
-        ["python", "-m", "src.llmproxy.main"],
+        ["python3", "-m", "src.llmproxy.main"],
         cwd=str(project_root),
         env=env,
         stdout=subprocess.PIPE,

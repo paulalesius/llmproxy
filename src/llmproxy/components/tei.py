@@ -194,6 +194,8 @@ class TEIComponent:
                 results_raw = []
             
             # Transform llama-server response to TEI format
+            results = []
+            for i, item in enumerate(results_raw):
                 # Preserve original index from backend (TEI spec: maps back to input documents)
                 # Fallback to enumerate position only if backend doesn't provide it
                 original_index = item.get("index", i)

@@ -14,7 +14,7 @@ class TestTEIRerank:
         response = sync_client.post(
             "/v1/rerank",
             json={
-                "model": "reranker",
+                "model": "bge-reranker-v2-m3",
                 "query": "test query",
                 "documents": ["doc1", "doc2"]
             }
@@ -42,7 +42,7 @@ class TestTEIRerank:
         response = sync_client.post(
             "/v1/rerank",
             json={
-                "model": "reranker",
+                "model": "bge-reranker-v2-m3",
                 "query": "machine learning",
                 "documents": [
                     "python code",
@@ -77,7 +77,7 @@ class TestTEIRerank:
         response = sync_client.post(
             "/v1/rerank",
             json={
-                "model": "reranker",
+                "model": "bge-reranker-v2-m3",
                 "query": "test",
                 "texts": ["text1", "text2", "text3"]
             }
@@ -92,7 +92,7 @@ class TestTEIRerank:
         response = sync_client.post(
             "/v1/rerank",
             json={
-                "model": "reranker",
+                "model": "bge-reranker-v2-m3",
                 "query": "test",
                 "documents": ["doc1", "doc2"],
                 "return_documents": True
@@ -119,7 +119,7 @@ class TestTEIRerank:
         response = sync_client.post(
             "/rerank",
             json={
-                "model": "reranker",
+                "model": "bge-reranker-v2-m3",
                 "query": "test",
                 "documents": ["doc1"]
             }
