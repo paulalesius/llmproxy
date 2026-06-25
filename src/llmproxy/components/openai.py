@@ -47,11 +47,11 @@ class OpenAIComponent:
             if stream:
                 req = self.client.build_request(method, path, json=json_body, headers=headers)
                 resp = await self.client.send(req, stream=True)
-                return resp
+                return resp  # Return response object directly for streaming
             else:
                 resp = await self.client.request(method, path, json=json_body, headers=headers)
                 resp.raise_for_status()
-                return resp.json(), resp.status_code
+                return resp.json(), resp.status_code  # Return (json, status) tuple for non-streaming
         except httpx.HTTPStatusError as e:
             return e.response.json() if e.response.content else {"error": str(e)}, e.response.status_code
         except Exception as e:
@@ -63,6 +63,7 @@ class OpenAIComponent:
         result = await self._request("POST", "/v1/chat/completions", json_body=body, stream=is_stream)
 
         if is_stream:
+            # result is an httpx.Response object when streaming
             async def stream_gen():
                 async for line in result.aiter_lines():
                     yield line + "\n"

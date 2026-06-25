@@ -94,7 +94,17 @@ def create_app(config_path: str | None = None) -> FastAPI:
         body = await request.json()
         req = RerankRequest(**body)
         result = await app.state.tei.rerank(req)
-        return result
+        # Return just the results list (TEI-compatible format)
+        return result.results
+
+    @app.post("/rerank")
+    async def rerank_alt(request: Request):
+        """Alternative /rerank path (same as /v1/rerank)."""
+        from .components.tei import RerankRequest
+        body = await request.json()
+        req = RerankRequest(**body)
+        result = await app.state.tei.rerank(req)
+        return result.results
 
     @app.get("/v1/models")
     async def list_models():
@@ -108,5 +118,21 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @app.get("/health")
     async def health():
         return {"status": "healthy"}
+
+    # TEI info endpoints
+    @app.get("/info")
+    async def info():
+        """TEI-compatible info endpoint (proxied to rerank backend /info)."""
+        try:
+            resp = await app.state.tei.client.get("/info")
+            resp.raise_for_status()
+            return resp.json()
+        except Exception:
+            return {"model_id": "reranker", "revision": "unknown", "task": "reranking"}
+
+    @app.get("/v1/info")
+    async def info_v1():
+        """Alternative /v1/info path (same as /info)."""
+        return await info()
 
     return app
