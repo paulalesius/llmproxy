@@ -1,6 +1,5 @@
-"""Tests for LLMPROXY_LOCK_SCRIPT functionality with different modes."""
+"""Tests for lock script functionality via YAML configuration only."""
 
-import os
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -335,59 +334,50 @@ class TestLoadLockScriptEdgeCases:
         assert exec_result["success"] is True
 
 
-class TestLLMPROXY_LOCK_SCRIPTEnvironmentVariable:
-    """Test integration with LLMPROXY_LOCK_SCRIPT environment variable."""
+class TestLockScriptYamlConfiguration:
+    """Test lock script configuration via YAML only."""
     
-    def test_env_variable_python_script(self, tmp_path, monkeypatch):
-        """Test loading from LLMPROXY_LOCK_SCRIPT env var with Python script."""
-        script_path = tmp_path / "env_lock.py"
+    def test_yaml_config_python_script(self, tmp_path, monkeypatch):
+        """Test loading lock script from YAML configuration with Python script."""
+        script_path = tmp_path / "yaml_lock.py"
         script_path.write_text("def handle_request(data): return True")
         
-        monkeypatch.setenv("LLMPROXY_LOCK_SCRIPT", str(script_path))
-        
-        result = load_lock_script(os.environ.get("LLMPROXY_LOCK_SCRIPT", ""))
+        # Simulate YAML config value being passed
+        result = load_lock_script(str(script_path))
         
         assert result["type"] == "python"
         assert callable(result.get("handle_request"))
     
-    def test_env_variable_shell_script(self, tmp_path, monkeypatch):
-        """Test loading from LLMPROXY_LOCK_SCRIPT env var with Shell script."""
-        script_path = tmp_path / "env_lock.sh"
+    def test_yaml_config_shell_script(self, tmp_path):
+        """Test loading lock script from YAML configuration with Shell script."""
+        script_path = tmp_path / "yaml_lock.sh"
         script_path.write_text("#!/bin/bash\necho 'locked'")
         script_path.chmod(0o755)
         
-        monkeypatch.setenv("LLMPROXY_LOCK_SCRIPT", str(script_path))
-        
-        result = load_lock_script(os.environ.get("LLMPROXY_LOCK_SCRIPT", ""))
+        result = load_lock_script(str(script_path))
         
         assert result["type"] == "shell"
     
-    def test_env_variable_bash_command(self, monkeypatch):
-        """Test loading from LLMPROXY_LOCK_SCRIPT env var with bash command."""
-        command = "echo 'env_lock_active'"
+    def test_yaml_config_bash_command(self):
+        """Test loading lock script from YAML configuration with bash command."""
+        command = "echo 'yaml_lock_active'"
         
-        monkeypatch.setenv("LLMPROXY_LOCK_SCRIPT", command)
-        
-        result = load_lock_script(os.environ.get("LLMPROXY_LOCK_SCRIPT", ""))
+        result = load_lock_script(command)
         
         assert result["type"] == "command"
         
         exec_result = execute_lock_script(result, {"method": "POST"})
         assert exec_result["success"] is True
-        assert "env_lock_active" in exec_result["result"]
+        assert "yaml_lock_active" in exec_result["result"]
     
-    def test_env_variable_empty(self, monkeypatch):
-        """Test loading from empty LLMPROXY_LOCK_SCRIPT env var."""
-        monkeypatch.setenv("LLMPROXY_LOCK_SCRIPT", "")
-        
-        result = load_lock_script(os.environ.get("LLMPROXY_LOCK_SCRIPT", ""))
+    def test_yaml_config_empty(self):
+        """Test loading from empty YAML lock_script field."""
+        result = load_lock_script("")
         
         assert result["type"] == "unknown"
     
-    def test_env_variable_not_set(self, monkeypatch):
-        """Test loading when LLMPROXY_LOCK_SCRIPT env var is not set."""
-        monkeypatch.delenv("LLMPROXY_LOCK_SCRIPT", raising=False)
-        
-        result = load_lock_script(os.environ.get("LLMPROXY_LOCK_SCRIPT", ""))
+    def test_yaml_config_not_set(self):
+        """Test loading when YAML lock_script field is not set (None)."""
+        result = load_lock_script(None)
         
         assert result["type"] == "unknown"

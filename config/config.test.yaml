@@ -7,27 +7,24 @@ server:
 
 backends:
   llm:
-    url: "http://127.0.0.1:8001"
+    url: "http://127.0.0.1:8080"
     locks:
-      - chat
-      - embeddings
+      - embed
+      - rerank
       
   embed:
-    url: "http://127.0.0.1:8002"
+    url: "http://127.0.0.1:8081"
     locks:
-      - embeddings
+      - llm
+      - rerank
       
   rerank:
-    url: "http://127.0.0.1:8003"
-    locks: []
-    
-  audio:
-    url: "http://127.0.0.1:8004"
+    url: "http://127.0.0.1:8082"
     locks:
-      - chat
+      - llm
+      - embed
 
 # Lock configuration
 lock:
   enabled: true
   locked_error: false
-  retry_after: 5

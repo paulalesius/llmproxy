@@ -28,7 +28,7 @@ class EmbeddingsComponent:
             )
         logger.info(f"EmbeddingsComponent ready → {self.base_url}")
 
-    async def embeddings(self, body: dict, return_response: bool = False) -> Tuple[Dict[str, Any], int]:
+    async def embeddings(self, body: dict) -> Tuple[Dict[str, Any], int]:
         headers = {}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"

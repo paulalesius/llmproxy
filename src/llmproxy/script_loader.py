@@ -270,7 +270,7 @@ def execute_lock_script(hook: dict, request_data: dict = None) -> dict:
         }
 
 
-def load_lock_script(script_path: str) -> dict:
+def load_lock_script(script_path: str | None) -> dict:
     """Load lock script from path or bash command.
     
     Supports three modes:
@@ -298,7 +298,7 @@ def load_lock_script(script_path: str) -> dict:
             "error": "No script path specified"
         }
     
-    # Check if it's a file path
+    # Check if it's a file path (non-empty string that exists)
     if os.path.isfile(script_path):
         # Determine script type by extension
         _, ext = os.path.splitext(script_path)

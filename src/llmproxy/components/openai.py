@@ -58,7 +58,7 @@ class OpenAIComponent:
             logger.error(f"OpenAI backend error on {path}: {e}")
             return {"error": {"message": str(e)}}, 502
 
-    async def chat_completions(self, body: dict, return_response: bool = False):
+    async def chat_completions(self, body: dict):
         is_stream = body.get("stream", False)
         result = await self._request("POST", "/v1/chat/completions", json_body=body, stream=is_stream)
 
@@ -72,7 +72,7 @@ class OpenAIComponent:
         # Always return tuple (data, status) for consistent error handling
         return result
 
-    async def completions(self, body: dict, return_response: bool = False):
+    async def completions(self, body: dict):
         # Auto-fill model if missing
         if not body.get("model"):
             body = dict(body)

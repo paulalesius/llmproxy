@@ -79,7 +79,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @app.post("/v1/embeddings")
     async def embeddings(request: Request):
         body = await request.json()
-        data, status = await app.state.embeddings.embeddings(body, return_response=True)
+        data, status = await app.state.embeddings.embeddings(body)
         return JSONResponse(content=data, status_code=status)
 
     @app.post("/v1/rerank")

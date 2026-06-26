@@ -32,7 +32,7 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
             self._locks[backend] = asyncio.Lock()
     
     def _get_locking_backends(self, backend: str) -> list[str]:
-        """Get list of backends that lock this backend."""
+        """Get list of backends that this backend locks (acquired when this backend is accessed)."""
         config = get_config()
         return config.lock.backends.get(backend, [])
     
@@ -100,35 +100,34 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
             logger.debug(f"Lock hook {phase} for {backend}: {result['result']}")
     
     async def _acquire_locks(self, backend: str) -> None:
-        """Acquire locks for all backends that lock this one (blocking)."""
+        """Acquire locks for all backends that this one locks (blocking)."""
         locking_backends = self._get_locking_backends(backend)
         
         for locking_backend in sorted(locking_backends):
             await self._ensure_lock_initialized(locking_backend)
             await self._locks[locking_backend].acquire()
-            logger.debug(f"Acquired lock for {backend} via {locking_backend}")
+            logger.debug(f"Acquired lock for {locking_backend} (requested by {backend})")
     
     async def _release_locks(self, backend: str) -> None:
-        """Release locks for all backends that lock this one."""
+        """Release locks for all backends that this one locks."""
         locking_backends = self._get_locking_backends(backend)
         
         for locking_backend in sorted(locking_backends):
             if locking_backend in self._locks:
                 try:
                     self._locks[locking_backend].release()
-                    logger.debug(f"Released lock for {backend} via {locking_backend}")
+                    logger.debug(f"Released lock for {locking_backend} (requested by {backend})")
                 except RuntimeError:
                     logger.warning(f"Lock for {locking_backend} not held by {backend}")
     
     async def _is_locked(self, backend: str) -> bool:
-        """Check if any lock for this backend is currently held."""
+        """Check if any lock this backend needs to acquire is currently held."""
         locking_backends = self._get_locking_backends(backend)
         
         for locking_backend in locking_backends:
             if locking_backend in self._locks:
-                if not self._locks[locking_backend].locked():
-                    continue
-                return True
+                if self._locks[locking_backend].locked():
+                    return True
         return False
     
     async def dispatch(
