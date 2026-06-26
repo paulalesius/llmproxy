@@ -87,7 +87,12 @@ class TEIComponent:
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error(f"Rerank backend error: {e}")
-            return (e.response.json() if e.response.content else {"error": str(e)}), e.response.status_code
+            # Handle non-JSON error responses gracefully
+            try:
+                error_data = e.response.json()
+            except:
+                error_data = {"error": str(e)}
+            return error_data, e.response.status_code
         except Exception as e:
             logger.error(f"Rerank backend error: {e}")
             return {"error": {"message": str(e)}}, 502

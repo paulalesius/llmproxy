@@ -189,8 +189,21 @@ def execute_lock_script(hook: dict, request_data: dict = None) -> dict:
                     "error": "Shell script path or command not found"
                 }
             
-            # Run with clean environment (no LOCK_SCRIPT_* injection)
+            # Run with environment variables injected from request_data
             env = os.environ.copy()
+            
+            # Inject request data as environment variables for shell scripts
+            if request_data:
+                env["LOCK_SCRIPT_PHASE"] = request_data.get("phase", "pre")
+                env["LOCK_SCRIPT_METHOD"] = request_data.get("method", "")
+                env["LOCK_SCRIPT_PATH"] = request_data.get("path", "")
+                env["LOCK_SCRIPT_URL"] = request_data.get("url", "")
+                env["LOCK_SCRIPT_BACKEND"] = request_data.get("backend", "")
+                env["LOCK_SCRIPT_GLOBAL_LOCK_ENABLED"] = str(request_data.get("global_lock_enabled", False)).lower()
+                
+                # Post-phase specific variables
+                if request_data.get("phase") == "post":
+                    env["LOCK_SCRIPT_RESPONSE_STATUS"] = str(request_data.get("response_status", ""))
             
             # Run script or command
             if command:

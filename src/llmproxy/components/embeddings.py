@@ -39,7 +39,12 @@ class EmbeddingsComponent:
             data = resp.json()
             return data, resp.status_code
         except httpx.HTTPStatusError as e:
-            return (e.response.json() if e.response.content else {"error": str(e)}), e.response.status_code
+            # Handle non-JSON error responses gracefully
+            try:
+                error_data = e.response.json()
+            except:
+                error_data = {"error": str(e)}
+            return error_data, e.response.status_code
         except Exception as e:
             logger.error(f"Embeddings error: {e}")
             return {"error": {"message": str(e)}}, 502

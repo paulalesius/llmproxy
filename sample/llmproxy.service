@@ -9,9 +9,10 @@ Group=root
 WorkingDirectory=/src/llmproxy
 
 # Setup and start
-Environment=UV_PROJECT_ENVIRONMENT=/src/llmproxy/.venv-production
-ExecStartPre=/home/noname/.local/bin/uv sync
-ExecStart=/src/llmproxy/.venv-production/bin/python -m src.llmproxy.main -c /etc/llmproxy/config.yaml
+#Environment=UV_PROJECT_ENVIRONMENT=/src/llmproxy/.venv-production
+#ExecStartPre=/home/noname/.local/bin/uv sync
+#ExecStart=/src/llmproxy/.venv-production/bin/python -m src.llmproxy.main -c /etc/llmproxy/config.yaml
+ExecStart=/bin/bash -c 'UV_PROJECT_ENVIRONMENT=/src/llmproxy/.venv-production && /src/llmproxy/.venv-production/bin/python -m src.llmproxy.main -c /etc/llmproxy/config.yaml'
 Restart=on-failure
 TimeoutStopSec=90s
 RestartSec=5

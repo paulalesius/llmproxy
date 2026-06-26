@@ -53,7 +53,12 @@ class OpenAIComponent:
                 resp.raise_for_status()
                 return resp.json(), resp.status_code  # Return (json, status) tuple for non-streaming
         except httpx.HTTPStatusError as e:
-            return e.response.json() if e.response.content else {"error": str(e)}, e.response.status_code
+            # Handle non-JSON error responses gracefully
+            try:
+                error_data = e.response.json()
+            except:
+                error_data = {"error": str(e)}
+            return error_data, e.response.status_code
         except Exception as e:
             logger.error(f"OpenAI backend error on {path}: {e}")
             return {"error": {"message": str(e)}}, 502
@@ -64,10 +69,20 @@ class OpenAIComponent:
 
         if is_stream:
             # result is an httpx.Response object when streaming
+            status_code = result.status_code if hasattr(result, "status_code") else 200
+            
+            # If backend returned error status, return JSON error instead of streaming
+            if status_code >= 400:
+                try:
+                    error_data = result.json()
+                except:
+                    error_data = {"error": {"message": f"Backend error: {status_code}"}}
+                return error_data, status_code
+            
             async def stream_gen():
                 async for line in result.aiter_lines():
                     yield line + "\n"
-            return StreamingResponse(stream_gen(), media_type="text/event-stream"), 200
+            return StreamingResponse(stream_gen(), media_type="text/event-stream"), status_code
 
         # Always return tuple (data, status) for consistent error handling
         return result
@@ -82,10 +97,21 @@ class OpenAIComponent:
         result = await self._request("POST", "/v1/completions", json_body=body, stream=is_stream)
 
         if is_stream:
+            # result is an httpx.Response object when streaming
+            status_code = result.status_code if hasattr(result, "status_code") else 200
+            
+            # If backend returned error status, return JSON error instead of streaming
+            if status_code >= 400:
+                try:
+                    error_data = result.json()
+                except:
+                    error_data = {"error": {"message": f"Backend error: {status_code}"}}
+                return error_data, status_code
+            
             async def stream_gen():
                 async for line in result.aiter_lines():
                     yield line + "\n"
-            return StreamingResponse(stream_gen(), media_type="text/event-stream"), 200
+            return StreamingResponse(stream_gen(), media_type="text/event-stream"), status_code
 
         # Always return tuple (data, status) for consistent error handling
         return result

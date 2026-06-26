@@ -115,6 +115,9 @@ def build_app_config(raw: Dict[str, Any]) -> AppConfig:
         if backend_config.locks:
             lock_backends_map[backend_name] = list(backend_config.locks)
     
+    # Get default lock_script from backends section (applies to all backends)
+    backends_default_lock_script = backends_raw.get("lock_script")
+    
     lock_raw = raw.get("global_lock") or raw.get("lock") or backends_raw.get("global_lock", {})
     if isinstance(lock_raw, bool):
         lock_raw = {"enabled": lock_raw}
@@ -125,11 +128,14 @@ def build_app_config(raw: Dict[str, Any]) -> AppConfig:
         if key not in raw_backends:
             raw_backends[key] = value
     
+    # Use backends-level lock_script as default if not specified in lock section
+    lock_script = lock_raw.get("lock_script") or backends_default_lock_script
+    
     lock = LockConfig(
         enabled=bool(lock_raw.get("enabled", True)),
         locked_error=bool(lock_raw.get("locked_error", False)),
         backends=raw_backends,
-        lock_script=lock_raw.get("lock_script"),
+        lock_script=lock_script,
     )
 
     api_key = raw.get("api_key") or server_raw.get("api_key") or ""
