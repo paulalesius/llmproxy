@@ -4,8 +4,8 @@ After=network.target llama-server.service llama-reranker.service llama-embedding
 
 [Service]
 Type=simple
-User=noname
-Group=noname
+User=root
+Group=root
 WorkingDirectory=/src/llmproxy
 
 # Setup and start

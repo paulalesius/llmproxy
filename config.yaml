@@ -1,0 +1,35 @@
+# LLM Proxy Test Configuration
+server:
+  host: "127.0.0.1"
+  port: 4002
+  log_level: "ERROR"
+
+backends:
+  llm:
+    url: "http://127.0.0.1:8080"
+    locks:
+      - embed
+      - rerank
+
+  embed:
+    url: "http://127.0.0.1:8081"
+    locks:
+      - llm
+      - rerank
+
+  rerank:
+    url: "http://127.0.0.1:8082"
+    locks:
+      - llm
+      - embed
+
+  stt:
+    url: "http://127.0.0.1:8083"
+    read_timeout: 600
+
+  tts:
+    url: "http://127.0.0.1:8084"
+
+lock:
+  enabled: true
+  locked_error: false

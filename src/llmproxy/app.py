@@ -237,11 +237,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
             """
             path = f"/{full_path}" if full_path else "/"
 
-            # Explicit safeguard: skip known core paths to prevent any possible shadowing of specific routes
-            if any(path.startswith(p) for p in ("/v1/", "/models", "/rerank", "/info", "/health", "/debug", "/")) and not path.startswith(("/custom/", "/my-")):
-                from fastapi import HTTPException
-                raise HTTPException(status_code=404, detail="Not found")
-
+            # Core routes take precedence (registered first + get_backend_for_path checks them first).
+            # Only forward if it's a custom backend (str name).
             backend = get_backend_for_path(path)
 
             if isinstance(backend, str) and backend in getattr(app.state, "forwarders", {}):
