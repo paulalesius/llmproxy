@@ -36,6 +36,12 @@ It also adds important production features that llama-server alone does not prov
   - `return_text` → `return_documents`
   - Automatic `model="reranker"` default
 
+### Audio (STT / TTS) Compatibility
+OpenAI-compatible audio endpoints (routed to dedicated backends):
+- `POST /v1/audio/transcriptions` — Speech-to-text (multipart/form-data)
+- `POST /v1/audio/translations` — Speech translation to English (multipart/form-data)
+- `POST /v1/audio/speech` — Text-to-speech (JSON in → audio binary out)
+
 ### Production-Grade Capabilities
 - **Global Locks** (optional): Serialize heavy endpoints (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`) so they never run concurrently. Prevents backend overload. Can return `503` immediately or block and wait.
 - **API Key Authentication** (optional): Protect all OpenAI endpoints with a simple Bearer token.
@@ -65,69 +71,7 @@ It also adds important production features that llama-server alone does not prov
    models
 ```
 
-**Internal components**:
-- `OpenAIComponent` — handles chat, completions, models + streaming logic
-- `EmbeddingsComponent` — thin proxy to dedicated embeddings backend
-- `TEIComponent` — rerank proxy with format normalization and index preservation
-- `Backend` (enum) — LLM, EMBED, RERANK with path mappings
-- `GlobalLockMiddleware` + `APIKeyMiddleware` + `LoggingMiddleware`
-
-All components use `httpx.AsyncClient` with carefully tuned timeouts.
-
-## Key Implementation Details
-
-### Backend-based global locking
-
-Each backend has its own lock. When a request hits a path, `GlobalLockMiddleware`:
-1. Identifies the backend for the path using `get_backend_for_path()`
-2. Acquires locks for all backends configured in `config.yaml`
-3. Executes the request
-4. Releases locks
-
-**Critical:** Backends do NOT lock themselves. If `llm` locks `embed` and `rerank`, it does NOT lock `llm`.
-
-### Dynamic path matching
-
-`get_backend_for_path()` uses prefix matching for dynamic paths:
-
-```python
-if path.startswith("/v1/models/") and path != "/v1/models":
-    return Backend.LLM
-```
-
-This ensures `/v1/models/xxx` is matched to LLM backend for locking.
-
-### Tuple handling
-
-All component methods return `(body, status)` tuple when `return_response=True`:
-
-```python
-# Correct (all endpoints)
-result, status = await app.state.llm.chat_completions(request, return_response=True)
-return JSONResponse(content=result, status_code=int(status))
-
-# Wrong (old embeddings code)
-result, status = await app.state.embeddings.embeddings(request)  # Missing return_response=True
-```
-
-### Streaming support
-
-Detects `stream: true` in request body, returns `StreamingResponse(resp.aiter_lines(), media_type="text/event-stream")`
-
-### Error forwarding
-
-All endpoints return `(body, status)` tuple, `main.py` wraps with `JSONResponse(content=body, status_code=status)`
-
-### Index preservation
-
-TEI rerank results: `index = item.get("index", i)` preserves backend's original document index, not sorted position
-
-### Hindsight compatibility
-
-- `texts` → `documents`
-- `return_text` → `return_documents`
-- Auto-default `model="reranker"` if missing
-- Auto-default `documents=["no documents provided"]` if empty
+The proxy routes requests to the appropriate specialized backend (LLM chat, embeddings, reranker, STT, or TTS) while adding cross-cutting features like global locking and authentication.
 
 ## Quick Start
 
@@ -321,6 +265,28 @@ curl -X POST http://localhost:8000/v1/embeddings \
   }'
 ```
 
+### Audio – Transcriptions (STT)
+
+```bash
+curl -X POST http://localhost:8000/v1/audio/transcriptions \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -F file="@audio.mp3" \
+  -F model="whisper-large-v3"
+```
+
+### Audio – Speech (TTS)
+
+```bash
+curl -X POST http://localhost:8000/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "tts-1",
+    "input": "Hello world, this is a test.",
+    "voice": "alloy"
+  }' \
+  --output speech.mp3
+```
+
 ## Deployment (systemd)
 
 A ready-to-use unit file is included (`llmproxy.service`).
@@ -346,74 +312,23 @@ The service file uses `-c` flag to specify config path.
 
 ## Troubleshooting
 
-### 500 Internal Server Error on embeddings
-
-**Cause**: `openai_embeddings()` endpoint unpacking bug (old code)
-
-**Solution**: Ensure `openai_embeddings()` uses `return_response=True`:
-
-```python
-result, status = await app.state.embeddings.embeddings(request, return_response=True)
-return JSONResponse(content=result, status_code=int(status))
-```
-
 ### Global locks not working
 
-1. Check `config.yaml` has `global_lock.enabled: true`
-2. Verify backend names are correct (`llm`, `embed`, `rerank`)
-3. Ensure backends don't lock themselves (no `llm` in `llm.locks`)
-4. Check `/v1/models/xxx` paths are matched (prefix matching in `backend.py`)
-5. Pass config file with `-c /path/to/config.yaml` flag
+1. Check that your `config.yaml` contains a `lock:` (or `global_lock:`) section with `enabled: true`.
+2. Verify backend names are correct (`llm`, `embed`, `rerank`, `stt`, `tts`).
+3. Make sure backends only list *other* backends they should lock (never themselves).
+4. Pass your config with the `-c /path/to/config.yaml` flag.
 
-### uv location
+### uv not found
 
-`uv` is in `~/.local/bin/uv` (or `~/.cargo/bin/uv` if installed via cargo). Add to PATH or use full path:
+`uv` is usually at `~/.local/bin/uv`. Add it to your PATH or use the full path.
 
-```bash
-~/.local/bin/uv run python -m src.llmproxy.main -c /path/to/config.yaml
-```
+### Audio endpoints return errors
 
-### Dynamic paths not matched for locking
-
-**Cause**: `/v1/models/xxx` paths not matched by `get_backend_for_path()`
-
-**Solution**: Ensure `backend.py` has prefix matching:
-
-```python
-if path.startswith("/v1/models/") and path != "/v1/models":
-    return Backend.LLM
-```
-
-## References
-
-## References
-
-- [SKILL.md](./SKILL.md) - Setup guide and common pitfalls
-- [test.sh](./test.sh) - Integration tests (run with `uv run pytest`)
-- [src/llmproxy/config.yaml](./src/llmproxy/config.yaml) - Backend-based lock configuration
-
-## Testing
-
-Run integration tests:
-
-```bash
-cd /src/llmproxy
-uv run python -m src.llmproxy.main -c /path/to/config.yaml
-```
-
-Expected: All 13 global lock tests pass (uses mocked fixture, no backends needed)
-
-Full test suite:
-
-```bash
-cd /src/llmproxy
-uv run python -m src.llmproxy.main -c /path/to/config.yaml
-```
-
-Expected: 67/67 tests pass (uses mocked fixture, no backends needed)
+Make sure you have `backends.stt` and `backends.tts` configured with valid URLs in your YAML (they default to localhost ports 8083/8084).
 
 Apache License 2.0
 
 ---
 
-**LLM Proxy** — One clean API in front of many specialized LLM backends.
+**LLM Proxy** — One clean API in front of many specialized LLM backends (chat, embeddings, rerank, STT, TTS).
