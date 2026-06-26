@@ -10,6 +10,8 @@ class Backend(Enum):
     LLM = "llm"
     EMBED = "embed"
     RERANK = "rerank"
+    STT = "stt"
+    TTS = "tts"
     
     @property
     def paths(self) -> list[str]:
@@ -30,6 +32,11 @@ class Backend(Enum):
                 "/info",
                 "/v1/info",
             ],
+            Backend.STT: [
+                "/v1/audio/transcriptions",
+                "/v1/audio/translations",
+            ],
+            Backend.TTS: ["/v1/audio/speech"],
         }
         return mapping[self]
     

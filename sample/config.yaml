@@ -35,3 +35,15 @@ backends:
     timeout: 30
     read_timeout: 120
     locks: [llm, embed]
+  tts:
+    base_url: http://127.0.0.1:8083
+    api_key: ""
+    timeout: 30
+    read_timeout: 60
+    locks: []
+  stt:
+    base_url: http://127.0.0.1:8084
+    api_key: ""
+    timeout: 30
+    read_timeout: 60
+    locks: []

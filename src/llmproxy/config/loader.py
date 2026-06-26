@@ -39,7 +39,7 @@ def build_app_config(raw: Dict[str, Any]) -> AppConfig:
     #     base_url: ...
     #   llm:
     #     ...
-    for name in ["llm", "embed", "rerank", "embeddings"]:
+    for name in ["llm", "embed", "rerank", "embeddings", "stt", "tts"]:
         entry = backends_raw.get(name) or backends_raw.get(name.replace("embeddings", "embed"))
         if isinstance(entry, dict):
             url = entry.get("base_url") or entry.get("url") or entry.get("baseURL") or ""
@@ -49,6 +49,10 @@ def build_app_config(raw: Dict[str, Any]) -> AppConfig:
                 url = "http://127.0.0.1:8080"
             elif not url and name in ("embed", "embeddings"):
                 url = "http://127.0.0.1:8081"
+            elif not url and name == "stt":
+                url = "http://127.0.0.1:8083"
+            elif not url and name == "tts":
+                url = "http://127.0.0.1:8084"
 
             backends[name if name != "embeddings" else "embed"] = BackendConfig(
                 name=name if name != "embeddings" else "embed",
@@ -60,10 +64,14 @@ def build_app_config(raw: Dict[str, Any]) -> AppConfig:
                 lock_script=entry.get("lock_script"),
             )
 
-    # Ensure we always have the three main backends
-    for name, default_url in [("llm", "http://127.0.0.1:8080"),
-                              ("embed", "http://127.0.0.1:8081"),
-                              ("rerank", "http://127.0.0.1:8082")]:
+    # Ensure we always have the main backends
+    for name, default_url in [
+        ("llm", "http://127.0.0.1:8080"),
+        ("embed", "http://127.0.0.1:8081"),
+        ("rerank", "http://127.0.0.1:8082"),
+        ("stt", "http://127.0.0.1:8083"),
+        ("tts", "http://127.0.0.1:8084"),
+    ]:
         if name not in backends:
             backends[name] = BackendConfig(name=name, url=default_url)
 

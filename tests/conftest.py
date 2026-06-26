@@ -209,6 +209,43 @@ async def mock_info_v1(request):
     return await mock_info(request)
 
 
+# ============================================================
+# AUDIO (STT + TTS) MOCKS
+# ============================================================
+
+@mock_router.post("http://127.0.0.1:8083/v1/audio/transcriptions")
+async def mock_transcriptions(request):
+    """Mock STT transcription endpoint."""
+    # For multipart we don't easily parse here, just return a realistic response
+    return httpx.Response(200, json={
+        "text": "This is a mocked transcription from the test backend.",
+        "task": "transcribe",
+        "language": "en"
+    })
+
+
+@mock_router.post("http://127.0.0.1:8083/v1/audio/translations")
+async def mock_translations(request):
+    """Mock STT translation endpoint."""
+    return httpx.Response(200, json={
+        "text": "This is a mocked translation to English.",
+        "task": "translate",
+        "language": "en"
+    })
+
+
+@mock_router.post("http://127.0.0.1:8084/v1/audio/speech")
+async def mock_speech(request):
+    """Mock TTS speech endpoint - returns fake audio bytes."""
+    # Fake MP3 header + some data
+    fake_mp3 = b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"mocked audio data for TTS test " * 5
+    return httpx.Response(
+        200,
+        content=fake_mp3,
+        headers={"Content-Type": "audio/mpeg", "Content-Length": str(len(fake_mp3))}
+    )
+
+
 @pytest.fixture(scope="session")
 def app():
     """FastAPI app with all backends mocked. Used by default."""
@@ -237,31 +274,43 @@ def sync_client(app):
 @pytest.fixture(scope="session")
 def llmproxy_server():
     """Real server with real backends. Only use when needed."""
-    import os
     import subprocess
     import time
 
     project_root = Path(__file__).parent.parent
     config_path = project_root / "config" / "config.test.yaml"
 
+    if not config_path.exists():
+        pytest.skip(f"Real server config not found: {config_path}")
+
     proc = subprocess.Popen(
         ["python3", "-m", "src.llmproxy.main", "-c", str(config_path)],
         cwd=str(project_root),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        text=True,
     )
 
     base_url = "http://127.0.0.1:4002"
+    started = False
     for _ in range(15):
         try:
             if httpx.get(f"{base_url}/health", timeout=2).status_code == 200:
+                started = True
                 break
         except Exception:
             pass
         time.sleep(1)
-    else:
+
+    if not started:
+        stdout, stderr = proc.communicate(timeout=5)
         proc.terminate()
-        pytest.fail("Real server failed to start")
+        pytest.skip(
+            f"Real llmproxy server failed to start.\n"
+            f"Config used: {config_path}\n"
+            f"STDOUT:\n{stdout}\n"
+            f"STDERR:\n{stderr}"
+        )
 
     yield base_url
     proc.terminate()

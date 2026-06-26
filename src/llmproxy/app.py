@@ -5,11 +5,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.responses import Response as StarletteResponse
 
 from .config import get_config, reload_config
 from .components.openai import OpenAIComponent
 from .components.tei import TEIComponent
 from .components.embeddings import EmbeddingsComponent
+from .components.audio import STTComponent, TTSComponent
 from .middleware import LoggingMiddleware, APIKeyMiddleware, GlobalLockMiddleware
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,8 @@ async def lifespan(app: FastAPI):
     app.state.openai = OpenAIComponent()
     app.state.tei = TEIComponent()
     app.state.embeddings = EmbeddingsComponent()
+    app.state.stt = STTComponent()
+    app.state.tts = TTSComponent()
 
     logger.info("All components initialized")
     yield
@@ -31,6 +35,8 @@ async def lifespan(app: FastAPI):
     await app.state.openai.close()
     await app.state.tei.close()
     await app.state.embeddings.close()
+    await app.state.stt.close()
+    await app.state.tts.close()
 
 
 def create_app(config_path: str | None = None) -> FastAPI:
@@ -137,5 +143,42 @@ def create_app(config_path: str | None = None) -> FastAPI:
         """Alternative /v1/info path (same as /info)."""
         data, status = await app.state.tei.get_info()
         return JSONResponse(content=data, status_code=status)
+
+    # ==================== AUDIO (STT / TTS) ROUTES ====================
+
+    @app.post("/v1/audio/transcriptions")
+    async def audio_transcriptions(request: Request):
+        """OpenAI-compatible STT transcription endpoint (multipart/form-data)."""
+        resp = await app.state.stt.transcriptions(request)
+        return StarletteResponse(
+            content=resp.content,
+            status_code=resp.status_code,
+            headers=dict(resp.headers),
+            media_type=resp.headers.get("content-type", "application/json"),
+        )
+
+    @app.post("/v1/audio/translations")
+    async def audio_translations(request: Request):
+        """OpenAI-compatible STT translation endpoint (multipart/form-data)."""
+        resp = await app.state.stt.translations(request)
+        return StarletteResponse(
+            content=resp.content,
+            status_code=resp.status_code,
+            headers=dict(resp.headers),
+            media_type=resp.headers.get("content-type", "application/json"),
+        )
+
+    @app.post("/v1/audio/speech")
+    async def audio_speech(request: Request):
+        """OpenAI-compatible TTS endpoint (JSON in, audio binary out)."""
+        resp = await app.state.tts.speech(request)
+        # Determine media type from backend or default to audio/mpeg
+        media_type = resp.headers.get("content-type", "audio/mpeg")
+        return StarletteResponse(
+            content=resp.content,
+            status_code=resp.status_code,
+            headers=dict(resp.headers),
+            media_type=media_type,
+        )
 
     return app
