@@ -3,6 +3,7 @@
 import pytest
 import httpx
 import respx
+import re
 from fastapi.testclient import TestClient
 from pathlib import Path
 import json
@@ -102,9 +103,12 @@ async def mock_models_list(request):
         ]
     })
 
-@mock_router.get("http://127.0.0.1:8080/v1/models/{model_id}")
+@mock_router.get(re.compile(r"http://127.0.0.1:8080/v1/models/([^/]+)"))
 async def mock_model_detail(request):
-    model_id = request.url.path.split("/")[-1]
+    # Catch-all for /v1/models/{model_id} paths - extract model_id from URL
+    # Path is /v1/models/{model_id} -> split gives ['', 'v1', 'models', 'model_id']
+    path_parts = request.url.path.rstrip("/").split("/")
+    model_id = path_parts[-1] if len(path_parts) >= 4 and path_parts[-1] else "unknown"
     return httpx.Response(200, json={
         "id": model_id,
         "object": "model",

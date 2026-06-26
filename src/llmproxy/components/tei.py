@@ -54,7 +54,7 @@ class TEIComponent:
             )
         logger.info(f"TEIComponent ready → {self.base_url}")
 
-    async def rerank(self, request: RerankRequest) -> RerankResponse:
+    async def rerank(self, request: RerankRequest) -> tuple[dict, int]:
         start = time.time()
 
         # Hindsight compatibility
@@ -77,13 +77,20 @@ class TEIComponent:
         if return_documents:
             payload["return_documents"] = True
 
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
         try:
-            resp = await self.client.post("/rerank", json=payload)
+            resp = await self.client.post("/rerank", json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Rerank backend error: {e}")
+            return (e.response.json() if e.response.content else {"error": str(e)}), e.response.status_code
         except Exception as e:
             logger.error(f"Rerank backend error: {e}")
-            raise
+            return {"error": {"message": str(e)}}, 502
 
         results = []
         for i, item in enumerate(data.get("results", [])):
@@ -94,7 +101,24 @@ class TEIComponent:
             ))
 
         logger.info(f"Rerank completed in {time.time()-start:.2f}s → {len(results)} results")
-        return RerankResponse(model=model, results=results)
+        # Return just the results list (TEI-compatible format)
+        return {"results": [r.model_dump() for r in results]}, 200
+
+    async def get_info(self) -> tuple[dict, int]:
+        """Get backend info with proper auth header forwarding."""
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        try:
+            resp = await self.client.get("/info", headers=headers)
+            resp.raise_for_status()
+            return resp.json(), resp.status_code
+        except httpx.HTTPStatusError as e:
+            return (e.response.json() if e.response.content else {"error": str(e)}), e.response.status_code
+        except Exception as e:
+            logger.error(f"Info endpoint error: {e}")
+            return {"error": {"message": str(e)}}, 502
 
     async def close(self):
         await self.client.aclose()

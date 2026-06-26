@@ -22,11 +22,14 @@ class Backend(Enum):
                 "/v1/models/*",
                 "/models",
                 "/models/*",
+            ],
+            Backend.EMBED: ["/v1/embeddings"],
+            Backend.RERANK: [
+                "/v1/rerank",
+                "/rerank",
                 "/info",
                 "/v1/info",
             ],
-            Backend.EMBED: ["/v1/embeddings"],
-            Backend.RERANK: ["/v1/rerank"],
         }
         return mapping[self]
     

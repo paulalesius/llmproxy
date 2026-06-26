@@ -87,9 +87,9 @@ def create_app(config_path: str | None = None) -> FastAPI:
         from .components.tei import RerankRequest
         body = await request.json()
         req = RerankRequest(**body)
-        result = await app.state.tei.rerank(req)
+        data, status = await app.state.tei.rerank(req)
         # Return just the results list (TEI-compatible format)
-        return result.results
+        return JSONResponse(content=data.get("results", []), status_code=status)
 
     @app.post("/rerank")
     async def rerank_alt(request: Request):
@@ -97,12 +97,24 @@ def create_app(config_path: str | None = None) -> FastAPI:
         from .components.tei import RerankRequest
         body = await request.json()
         req = RerankRequest(**body)
-        result = await app.state.tei.rerank(req)
-        return result.results
+        data, status = await app.state.tei.rerank(req)
+        # Return just the results list (TEI-compatible format)
+        return JSONResponse(content=data.get("results", []), status_code=status)
 
     @app.get("/v1/models")
     async def list_models():
         data, status = await app.state.openai.models()
+        return JSONResponse(content=data, status_code=status)
+
+    @app.get("/v1/models/{model_id}")
+    async def model_detail(model_id: str):
+        data, status = await app.state.openai.model_detail(model_id)
+        return JSONResponse(content=data, status_code=status)
+
+    @app.get("/models/{model_id}")
+    async def model_detail_legacy(model_id: str):
+        """Legacy /models/{id} path (same as /v1/models/{id})."""
+        data, status = await app.state.openai.model_detail(model_id)
         return JSONResponse(content=data, status_code=status)
 
     @app.get("/")
@@ -117,16 +129,13 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @app.get("/info")
     async def info():
         """TEI-compatible info endpoint (proxied to rerank backend /info)."""
-        try:
-            resp = await app.state.tei.client.get("/info")
-            resp.raise_for_status()
-            return resp.json()
-        except Exception:
-            return {"model_id": "reranker", "revision": "unknown", "task": "reranking"}
+        data, status = await app.state.tei.get_info()
+        return JSONResponse(content=data, status_code=status)
 
     @app.get("/v1/info")
     async def info_v1():
         """Alternative /v1/info path (same as /info)."""
-        return await info()
+        data, status = await app.state.tei.get_info()
+        return JSONResponse(content=data, status_code=status)
 
     return app

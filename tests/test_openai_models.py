@@ -63,14 +63,11 @@ class TestOpenAIModels:
             # Test model detail endpoint
             response = sync_client.get(f"/v1/models/{model_id}")
             
-            # llama-server may return 404 for individual model detail
-            # Accept any response as valid proxy behavior
-            assert response.status_code in [200, 404, 422]
-            
-            # If successful, should have proper format
-            if response.status_code == 200:
-                data = response.json()
-                assert "id" in data or "object" in data
+            # Should return 200 with proper format (mocked backend)
+            assert response.status_code == 200
+            data = response.json()
+            assert "id" in data
+            assert data["id"] == model_id
         else:
             pytest.skip("No models available for detail test")
     

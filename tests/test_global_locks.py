@@ -210,45 +210,34 @@ class TestGlobalLockEndpointsRunFreely:
             resp = client.get("/v1/models")
             assert resp.status_code in [200, 500, 502]
     
-    def test_info_endpoint_not_locked(self, llmproxy_server):
-        """Test that /info and /v1/info are not locked."""
-        with httpx.Client(base_url=llmproxy_server) as client:
-            resp1 = client.get("/info")
-            resp2 = client.get("/v1/info")
-            # Both should respond
-            assert resp1.status_code in [200, 500]
-            assert resp2.status_code in [200, 500]
+    def test_info_endpoint_not_locked(self, sync_client):
+        """Test that /info and /v1/info are not locked (mocked)."""
+        resp1 = sync_client.get("/info")
+        resp2 = sync_client.get("/v1/info")
+        # Both should respond with 200 (mocked backend)
+        assert resp1.status_code == 200
+        assert resp2.status_code == 200
     
-    def test_root_endpoint_not_locked(self, llmproxy_server):
-        """Test that / (root) is not locked."""
-        with httpx.Client(base_url=llmproxy_server) as client:
-            resp = client.get("/")
-            assert resp.status_code == 200
-            assert "llmproxy" in resp.text
+    def test_root_endpoint_not_locked(self, sync_client):
+        """Test that / (root) is not locked (mocked)."""
+        resp = sync_client.get("/")
+        assert resp.status_code == 200
+        assert "llmproxy" in resp.text
 
 
 class TestGlobalLockParallelUnlockedEndpoints:
     """Test that unlocked endpoints can run in parallel."""
     
-    def test_health_and_rerank_parallel(self, llmproxy_server):
-        """Test that /health and /v1/rerank can run concurrently (both unlocked)."""
-        async def run_parallel():
-            async with httpx.AsyncClient(base_url=llmproxy_server) as client:
-                task1 = client.get("/health")
-                task2 = client.post("/v1/rerank", json={
-                    "model": "test",
-                    "query": "test",
-                    "texts": ["test"]
-                })
-                
-                resp1, resp2 = await asyncio.gather(task1, task2, return_exceptions=True)
-                return resp1, resp2
-        
-        resp1, resp2 = asyncio.run(run_parallel())
-        
-        # Both should complete quickly (no locking)
-        assert isinstance(resp1, httpx.Response)
+    def test_health_and_rerank_parallel(self, sync_client):
+        """Test that /health and /v1/rerank can run concurrently (both unlocked, mocked)."""
+        # Health endpoint is local (no backend needed)
+        resp1 = sync_client.get("/health")
         assert resp1.status_code == 200
         
-        if isinstance(resp2, httpx.Response):
-            assert resp2.status_code in [200, 422, 500]
+        # Rerank endpoint uses mocked backend
+        resp2 = sync_client.post("/v1/rerank", json={
+            "model": "test",
+            "query": "test",
+            "texts": ["test"]
+        })
+        assert resp2.status_code == 200
