@@ -227,29 +227,18 @@ LOCK_VAR = True
 class TestExecuteLockScriptShellMode:
     """Test execution of Shell mode lock scripts."""
     
-    def test_shell_script_with_environment_variables(self, tmp_path):
-        """Test that shell scripts receive request data as environment variables."""
-        script_path = tmp_path / "env_check.sh"
-        script_path.write_text("""#!/bin/bash
-if [ "$LOCK_SCRIPT_METHOD" = "POST" ]; then
-    echo "POST detected"
-    exit 0
-else
-    echo "GET detected"
-    exit 1
-fi
-""")
+    def test_shell_script_clean_environment(self, tmp_path):
+        """Test that shell scripts run with clean environment (no LOCK_SCRIPT_* injection)."""
+        script_path = tmp_path / "simple_lock.sh"
+        script_path.write_text("#!/bin/bash\necho 'lock_acquired'")
         script_path.chmod(0o755)
         
         result = load_lock_script(str(script_path))
         
-        post_result = execute_lock_script(result, {"method": "POST"})
-        assert post_result["success"] is True
-        assert "POST detected" in post_result["result"]
+        exec_result = execute_lock_script(result, {"method": "POST"})
         
-        get_result = execute_lock_script(result, {"method": "GET"})
-        assert get_result["success"] is False
-        assert "GET detected" in get_result["result"]
+        assert exec_result["success"] is True
+        assert "lock_acquired" in exec_result["result"]
     
     def test_shell_script_timeout(self, tmp_path):
         """Test that shell scripts respect timeout settings."""
@@ -269,16 +258,16 @@ fi
 class TestExecuteLockScriptBashCommandMode:
     """Test execution of Bash command mode."""
     
-    def test_bash_command_with_environment(self):
-        """Test that bash commands receive environment variables."""
-        command = "echo $LOCK_SCRIPT_METHOD"
+    def test_bash_command_clean_environment(self):
+        """Test that bash commands run with clean environment (no LOCK_SCRIPT_* injection)."""
+        command = "echo 'command_executed'"
         
         result = load_lock_script(command)
         
         exec_result = execute_lock_script(result, {"method": "POST"})
         
         assert exec_result["success"] is True
-        assert "POST" in exec_result["result"]
+        assert "command_executed" in exec_result["result"]
     
     def test_bash_command_chaining(self):
         """Test that bash command can chain multiple commands."""

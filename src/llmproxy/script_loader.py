@@ -128,24 +128,20 @@ def execute_hook(hook: dict, request_data: dict = None) -> dict:
 def execute_lock_script(hook: dict, request_data: dict = None) -> dict:
     """Execute a lock script (Python or shell).
     
+    Lock scripts are configured via the lock_script: field in YAML:
+        - Python scripts (.py): must export handle_request(request_data)
+        - Shell scripts (.sh, .bash): executed as external scripts
+        - Bash commands: raw command strings executed via shell
+    
     For Python scripts:
         - If handle_request() exists, call it with request_data
         - Supports phase detection via request_data.get("phase")
         - "post" phase includes response_status
     
-    For shell scripts:
-        - Exports request data as environment variables
-        - Runs script via subprocess
-        - Environment variables:
-          - LOCK_SCRIPT_METHOD, LOCK_SCRIPT_PATH, LOCK_SCRIPT_URL
-          - LOCK_SCRIPT_HEADERS (JSON-encoded)
-          - LOCK_SCRIPT_RESPONSE_STATUS (post phase only)
-          - LOCK_SCRIPT_PHASE (pre/post)
-    
-    For bash commands:
-        - Exports request data as environment variables
-        - Runs command via subprocess with shell=True
-        - Same environment variables as shell scripts
+    For shell scripts and bash commands:
+        - Executed via subprocess with clean environment
+        - No automatic request context injection
+        - Scripts must implement their own logic (file-based locks, etc.)
     
     Returns execution result:
         - success: bool
@@ -193,24 +189,8 @@ def execute_lock_script(hook: dict, request_data: dict = None) -> dict:
                     "error": "Shell script path or command not found"
                 }
             
-            # Build environment
+            # Run with clean environment (no LOCK_SCRIPT_* injection)
             env = os.environ.copy()
-            if request_data:
-                env["LOCK_SCRIPT_METHOD"] = request_data.get("method", "")
-                env["LOCK_SCRIPT_PATH"] = request_data.get("path", "")
-                env["LOCK_SCRIPT_URL"] = request_data.get("url", "")
-                env["LOCK_SCRIPT_HEADERS"] = str(request_data.get("headers", {}))
-                
-                # Phase indicator
-                phase = request_data.get("phase", "pre")
-                env["LOCK_SCRIPT_PHASE"] = phase
-                
-                # Global lock status
-                env["LOCK_SCRIPT_GLOBAL_LOCK_ENABLED"] = str(request_data.get("global_lock_enabled", False)).lower()
-                
-                # Post-phase specific
-                if phase == "post":
-                    env["LOCK_SCRIPT_RESPONSE_STATUS"] = str(request_data.get("response_status", ""))
             
             # Run script or command
             if command:
