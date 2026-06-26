@@ -36,7 +36,7 @@ backends:
     read_timeout: 120
     locks: [llm, embed]
   tts:
-    base_url: http://127.0.0.1:8083
+    base_url: http://127.0.0.1:7852
     api_key: ""
     timeout: 30
     read_timeout: 60

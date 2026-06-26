@@ -53,10 +53,10 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     # Middleware
     app.add_middleware(LoggingMiddleware)
-    if config.api_key:
-        app.add_middleware(APIKeyMiddleware)
     if config.lock.enabled:
         app.add_middleware(GlobalLockMiddleware)
+    if config.api_key:
+        app.add_middleware(APIKeyMiddleware)
 
     # ==================== ROUTES USING MODERN COMPONENTS ====================
 
