@@ -75,6 +75,9 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
         if not hook or hook.get("error"):
             return
         
+        # Get config for global_lock_enabled flag
+        config = get_config()
+        
         # Build request data for hook
         request_data = {
             "phase": phase,
@@ -83,7 +86,7 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
             "url": str(request.url),
             "headers": dict(request.headers),
             "backend": backend,
-            "global_lock_enabled": True,
+            "global_lock_enabled": config.lock.enabled,
         }
         
         if phase == "post" and response_status is not None:
@@ -134,11 +137,6 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
         call,
     ) -> Response:
         """Handle request with locking."""
-        # Skip if locking is disabled
-        config = get_config()
-        if not config.lock.enabled:
-            return await call(request)
-        
         # Get backend for this path
         backend = get_backend_for_path(request.url.path)
         
@@ -148,28 +146,33 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
         
         backend_name = backend.value
         
-        # Check locked_error mode
-        if config.lock.locked_error:
-            if await self._is_locked(backend_name):
-                logger.info(f"Backend {backend_name} is locked, returning 503")
-                return JSONResponse(
-                    status_code=HTTP_503_SERVICE_UNAVAILABLE,
-                    content={
-                        "error": {
-                            "message": f"Backend {backend_name} is currently locked",
-                            "type": "locked",
-                            "code": "backend_locked",
-                        },
-                        "retry_after": 5,
-                    },
-                )
+        # Get config for lock checks
+        config = get_config()
         
-        # Run pre-hook
+        # Run pre-hook (always, regardless of enabled state)
         await self._run_lock_hook(backend_name, "pre", request)
         
         try:
-            # Acquire locks
-            await self._acquire_locks(backend_name)
+            # Only acquire locks if enabled
+            if config.lock.enabled:
+                # Check locked_error mode
+                if config.lock.locked_error:
+                    if await self._is_locked(backend_name):
+                        logger.info(f"Backend {backend_name} is locked, returning 503")
+                        return JSONResponse(
+                            status_code=HTTP_503_SERVICE_UNAVAILABLE,
+                            content={
+                                "error": {
+                                    "message": f"Backend {backend_name} is currently locked",
+                                    "type": "locked",
+                                    "code": "backend_locked",
+                                },
+                                "retry_after": 5,
+                            },
+                        )
+                
+                # Acquire locks
+                await self._acquire_locks(backend_name)
             
             # Process request
             response = await call(request)
@@ -177,11 +180,12 @@ class GlobalLockMiddleware(BaseHTTPMiddleware):
             # Get status code for post-hook
             status_code = getattr(response, "status_code", None)
             
-            # Run post-hook
+            # Run post-hook (always, regardless of enabled state)
             await self._run_lock_hook(backend_name, "post", request, status_code)
             
             return response
         
         finally:
-            # Release locks
-            await self._release_locks(backend_name)
+            # Only release locks if enabled
+            if config.lock.enabled:
+                await self._release_locks(backend_name)
