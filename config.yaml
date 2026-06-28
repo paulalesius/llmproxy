@@ -1,35 +1,45 @@
-# LLM Proxy Test Configuration
+# Backend Locking Proxy Configuration
+# Example configuration showing all features
+
 server:
-  host: "127.0.0.1"
-  port: 4002
-  log_level: "ERROR"
+  host: 0.0.0.0
+  port: 4001
 
+# Define backends with their paths and lock dependencies
 backends:
+  # LLM backend - handles chat/completions
   llm:
-    url: "http://127.0.0.1:8080"
+    url: http://localhost:8080
+    paths:
+      - /v1/chat/completions
+      - /v1/completions
+      - /v1/models
+      - /v1/models/*
+    # Lock vision and embed while processing LLM requests
     locks:
+      - vision
       - embed
-      - rerank
 
+  # Vision backend - handles image analysis
+  vision:
+    url: http://localhost:8081
+    paths:
+      - /v1/vision/*
+    # No locks - vision doesn't lock other backends
+    locks: []
+
+  # Embeddings backend - handles vector embeddings
   embed:
-    url: "http://127.0.0.1:8081"
+    url: http://localhost:8082
+    paths:
+      - /v1/embeddings
+    # Lock LLM while processing embeddings
     locks:
       - llm
-      - rerank
 
-  rerank:
-    url: "http://127.0.0.1:8082"
-    locks:
-      - llm
-      - embed
-
-  stt:
-    url: "http://127.0.0.1:8083"
-    read_timeout: 600
-
-  tts:
-    url: "http://127.0.0.1:8084"
-
-lock:
+# Global lock settings
+global_lock:
+  # Enable global locking (set to false to disable)
   enabled: true
-  locked_error: false
+  # Lock timeout in seconds (used for waiting)
+  timeout: 300

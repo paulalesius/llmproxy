@@ -1,65 +1,35 @@
-# LLM Proxy
+# BLProxy - Backend Locking Proxy
 
-![Banner](banner.jpg)
-
-**A lightweight, production-oriented FastAPI proxy that provides a unified OpenAI-compatible and TEI-compatible API surface in front of multiple specialized backends (llama-server, embeddings, rerankers, STT/TTS, and arbitrary custom HTTP services).**
+A declarative backend proxy with global locking. Routes requests to configured backends and manages cross-backend resource locks.
 
 ## Purpose
 
-LLM Proxy solves the common problem of having **separate backends** for different LLM and AI capabilities:
+BLProxy solves the common problem of having **separate backends** for different AI capabilities:
 
 - One llama-server for chat & completions (router mode)
 - One dedicated server for embeddings
 - One server for reranking (TEI-compatible)
 - Optional STT / TTS backends
-- Any number of **custom/unknown API services** that still need to participate in resource coordination
+- Any custom HTTP services that need resource coordination
 
-Instead of clients talking to many different ports, LLM Proxy offers a single, clean endpoint with consistent OpenAI + TEI compatibility for the core services, plus transparent forwarding + global locking for everything else.
+Instead of clients talking to many different ports, BLProxy offers a single endpoint with transparent request forwarding and **global locking** to prevent resource contention.
 
-It also adds important production features that llama-server alone does not provide out of the box:
-- Request serialization / global locks (backend-based, not path-based)
-- Optional API key authentication
-- Pre- and post-request Python hooks
-- Proper streaming, error status code forwarding, and Hindsight compatibility
+## Key Features
 
-## Core Features
-
-### OpenAI Compatibility
-- `GET /v1/models` and `GET /v1/models/{id}`
-- `POST /v1/chat/completions` — full streaming (SSE) support
-- `POST /v1/completions` — streaming + automatic `model="default"` fallback
-- `POST /v1/embeddings` — routed to a **dedicated embeddings server**
-
-### TEI Rerank Compatibility
-- `POST /v1/rerank` and `POST /rerank`
-- Full TEI response format with correct `index` preservation (original document positions, not re-sorted)
-- Hindsight API compatibility shims:
-  - `texts` → `documents`
-  - `return_text` → `return_documents`
-  - Automatic `model="reranker"` default
-
-### Audio (STT / TTS) Compatibility
-OpenAI-compatible audio endpoints (routed to dedicated backends):
-- `POST /v1/audio/transcriptions` — Speech-to-text (multipart/form-data)
-- `POST /v1/audio/translations` — Speech translation to English (multipart/form-data)
-- `POST /v1/audio/speech` — Text-to-speech (JSON in → audio binary out)
-
-### Production-Grade Capabilities
-- **Global Locks** (optional, backend-based): Any backend (core or custom) can declare which other backends it should lock while processing. Prevents resource contention across LLM, embeddings, rerank, audio, and custom services.
-- **Custom / Unknown-API Forwarders** (`backends.custom`): Add arbitrary HTTP services under the proxy. They get transparent request forwarding (including streaming) and full participation in the global locking system.
-- **API Key Authentication** (optional): Protect all OpenAI endpoints with a simple Bearer token.
-- **Request Hooks**: Run custom Python code before and after every request (after lock acquisition).
-- **Configurable Logging**: Three levels (`info`, `debug`, `trace`) with intelligent truncation of large prompts/documents.
-- **Router-Mode Optimized**: Generous timeouts and graceful handling of slow model loading (20–35 s on first request to a model in router mode).
-- **Accurate Error Propagation**: All backend HTTP status codes (400, 429, 500, 504, etc.) are forwarded correctly to the client.
-- **CLI Configuration**: Use `-c/--config` flag to specify config file path
+- **Declarative Backend Configuration**: Define backends in YAML with paths and locks
+- **Global Locking**: Backends can lock other backends while processing
+- **Connection Pooling**: Shared httpx client for efficient connections
+- **Streaming Support**: SSE and regular responses streamed without buffering
+- **Timeout Handling**: Configurable lock timeouts with 503 + Retry-After
+- **Hop-by-Hop Header Filtering**: Proper HTTP proxy behavior
+- **Error Propagation**: Backend errors (4xx, 5xx) forwarded correctly
 
 ## Architecture
 
 ```
                      ┌─────────────────────────────┐
-                     │         LLM Proxy           │
-                     │   (FastAPI on :8000/4001)   │
+                     │         BLProxy              │
+                     │   (FastAPI on :4001)        │
                      └──────────────┬──────────────┘
                                     │
           ┌─────────────────────────┼─────────────────────────┐
@@ -70,281 +40,131 @@ OpenAI-compatible audio endpoints (routed to dedicated backends):
    │  (llama.cpp) │        │ Server         │        │ Server       │
    │   :8080      │        │   :8081        │        │   :8082      │
    └──────────────┘        └────────────────┘        └──────────────┘
-   chat / completions      embeddings only           /rerank only
-   models
+   /v1/chat/*             /v1/embeddings           /v1/rerank
+   locks: [embed]         locks: [llm]             locks: [llm, embed]
 ```
-
-The proxy routes requests to the appropriate specialized backend (LLM chat, embeddings, reranker, STT, TTS, or any custom service defined under `backends.custom`) while adding cross-cutting features like global locking and authentication.
 
 ## Quick Start
 
 ```bash
-cd llmproxy
+cd /src/blproxy
 uv sync
 
-# Edit config.yaml or use your own config file
-uv run python -m src.llmproxy.main -c /path/to/config.yaml
+# Edit config.yaml or use your own
+uv run python -m src.blproxy.main -c /path/to/config.yaml
 ```
 
-Configuration is done entirely through YAML config files. No environment variables are required.
+## Configuration
 
-## Configuration Reference
-
-All configuration is done through YAML config files. See the example config below.
-
-### Global Locks Example (backend-based, `config.yaml`)
-
-Backend-based locking is the recommended approach. Each backend configures which OTHER backends it locks:
+All configuration is done through YAML:
 
 ```yaml
 server:
   host: 0.0.0.0
   port: 4001
 
-# Optional global lock configuration
-# Remove this section entirely to disable locking
+# Global lock settings
 global_lock:
   enabled: true
-  locked_error: false
+  timeout: 300  # seconds to wait for locks
 
-backends:
-  # Default lock_script for all backends (can be overridden per-backend)
-  lock_script: ""
-  
-  llm:
-    base_url: http://127.0.0.1:8080
-    locks:
-      - embed
-      - rerank
-    # Can override default lock_script or set its own
-    # lock_script: "/path/to/llm-specific-lock.sh"
-  embed:
-    base_url: http://127.0.0.1:8081
-    locks:
-      - llm
-      - rerank
-  rerank:
-    base_url: http://127.0.0.1:8082
-    locks:
-      - llm
-      - embed
-```
-
-**Available backends:**
-- `llm`: `/v1/chat/completions`, `/v1/completions`, `/v1/models`, `/v1/models/{id}`
-- `embed`: `/v1/embeddings`
-- `rerank`: `/v1/rerank`, `/rerank`, `/v1/info`, `/info`
-
-**Key points:**
-- Backends do NOT lock themselves (no `llm` in `llm.locks`)
-- Each backend independently configures which other backends to lock
-- Dynamic paths like `/v1/models/xxx` are automatically matched to their backend
-- When `/v1/chat/completions` (LLM) runs, it locks `embed` and `rerank` backends
-- **`global_lock` section is optional** — omit it entirely to disable locking
-- **`enabled: true`** — if section exists but `enabled: false`, locking is disabled
-- **`locked_error: false`** — if `true`, returns 503 immediately when lock is held; if `false`, blocks until lock acquired
-- **`backends.lock_script: ""`** — optional default Python/shell/bash command for all backends (set at `backends:` level)
-- **Per-backend `lock_script`** — override the default for a specific backend (set at `backends.llm.lock_script`, etc.)
-
-### Custom / Unknown-API Backends (`backends.custom`)
-
-LLM Proxy supports **arbitrary custom backends** under `backends.custom`. These are transparent HTTP forwarders (no OpenAI/TEI protocol translation). They are useful for:
-
-- Internal tools, RAG services, or any HTTP API you want to put behind the same proxy
-- Including those services in the **global locking** system so they coordinate resource usage with LLM/embed/rerank backends
-
-Example:
-
-```yaml
 backends:
   llm:
     url: http://127.0.0.1:8080
-    locks: [embed, rerank]
+    paths:
+      - /v1/chat/completions
+      - /v1/completions
+      - /v1/models
+    locks:
+      - embed
+      - rerank
 
   embed:
     url: http://127.0.0.1:8081
-    locks: [llm, rerank]
+    paths:
+      - /v1/embeddings
+    locks:
+      - llm
 
-  custom:
-    my_rag_service:
-      url: http://127.0.0.1:9000
-      path_prefix: /rag
-      strip_prefix: true          # /rag/query → forwards to backend /query
-      locks:
-        - llm
-        - stt
-      timeout: 30
-      read_timeout: 300
-
-    internal_tool:
-      url: http://192.168.0.50:8085
-      paths:
-        - /tools/search
-        - /tools/analyze/*
-      locks: [llm]
+  rerank:
+    url: http://127.0.0.1:8082
+    paths:
+      - /v1/rerank
+      - /rerank
+    locks:
+      - llm
+      - embed
 ```
 
-**Behavior:**
-- Requests matching `path_prefix` or any entry in `paths` are forwarded transparently (all methods, headers, query params, streaming SSE, binary responses, etc.).
-- The custom backend participates fully in global locking (it can lock other backends and be locked by them).
-- Core endpoints (`/v1/chat/completions`, `/v1/embeddings`, etc.) are unaffected and take precedence.
+### Backend Configuration
 
-### Lock Script Hooks
+Each backend specifies:
 
-The lock script runs for every backend request, regardless of whether global locks are enabled.
+- `url`: Backend server URL
+- `paths`: List of path patterns (supports wildcards like `/v1/vision/*`)
+- `locks`: List of other backend names to lock while processing
 
-**Python scripts (.py):**
-- Can define a `handle_request(request_data)` function
-- `request_data` contains: `method`, `path`, `url`, `headers`, `phase`, `global_lock_enabled`
-- `phase` is "pre" (before request) or "post" (after response)
-- On post-phase: also includes `response_status`
-- Script runs on import if no `handle_request()` defined
+### Global Lock Settings
 
-**Shell scripts (.sh, .bash):**
-- Must be executable (`chmod +x script.sh`)
-- Request data passed as environment variables:
-  - `LOCK_SCRIPT_METHOD` - HTTP method (GET, POST, etc.)
-  - `LOCK_SCRIPT_PATH` - Request path (/v1/chat/completions, etc.)
-  - `LOCK_SCRIPT_URL` - Full URL
-  - `LOCK_SCRIPT_HEADERS` - Headers as JSON string
-  - `LOCK_SCRIPT_PHASE` - "pre" (before request) or "post" (after response)
-  - `LOCK_SCRIPT_RESPONSE_STATUS` - Response status code (post phase only)
-  - `LOCK_SCRIPT_GLOBAL_LOCK_ENABLED` - "true" or "false" string
+- `enabled`: Whether locking is active
+- `timeout`: Seconds to wait for locks (returns 503 if exceeded)
 
-**Example shell script:**
-```bash
-#!/bin/bash
-echo "Phase: $LOCK_SCRIPT_PHASE"
-echo "Path: $LOCK_SCRIPT_PATH"
-if [ "$LOCK_SCRIPT_PHASE" = "post" ]; then
-    echo "Response status: $LOCK_SCRIPT_RESPONSE_STATUS"
-fi
-```
+## How Locking Works
 
-**Example Python script:**
-```python
-def handle_request(request_data):
-    phase = request_data.get("phase", "pre")
-    if phase == "post":
-        print(f"Response status: {request_data.get('response_status')}")
-    print(f"Request to {request_data.get('path')}")
-```
+1. When a request arrives, BLProxy finds the matching backend
+2. If the backend has `locks` configured, BLProxy acquires those locks
+3. If locks are held by another backend, BLProxy waits up to `timeout` seconds
+4. Request is forwarded to the backend
+5. Locks are released after response is complete
 
-**Bash commands (raw command string in config.yaml):**
-- If `lock_script` is not a file path, it's treated as a raw bash command
-- Same environment variables as shell scripts
-- Example in config.yaml:
-```yaml
-backends:
-  lock_script: "echo 'Lock acquired' >> /var/log/llmproxy.lock"
-```
+**Example**: If `llm` locks `embed`, and an LLM request is processing, all embedding requests will wait until the LLM request completes.
 
-**Mode detection:**
-1. If path ends with `.py` → Python script
-2. If path ends with `.sh` or `.bash` → Shell script
-3. If path is a file with other extension → Shell script
-4. If path is not a file → Bash command
+## Response Handling
 
+- **SSE (Server-Sent Events)**: Streamed line-by-line for chat completions
+- **Regular responses**: Streamed byte-by-byte to avoid buffering
+- **Timeouts**: Configurable (300s default, 30s connect)
+- **Errors**: Backend HTTP status codes forwarded (400, 429, 500, 504, etc.)
 
-## Usage Examples
-
-### Chat Completions (streaming)
+## Testing
 
 ```bash
-curl -N -X POST http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "qwen3.6-dense-mtp-custom",
-    "messages": [{"role": "user", "content": "Write a haiku about programming."}],
-    "stream": true,
-    "max_tokens": 60
-  }'
+uv run pytest tests/ -v
 ```
 
-### Rerank (Hindsight-compatible format)
-
-```bash
-curl -X POST http://localhost:8000/v1/rerank \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "machine learning best practices",
-    "texts": [
-      "Always validate your models on a hold-out set.",
-      "Feature engineering is often more important than model choice.",
-      "The quick brown fox jumps over the lazy dog."
-    ],
-    "top_n": 2,
-    "return_text": true
-  }'
-```
-
-**Response** (note that `index` refers to the **original** position in your input array):
-
-```json
-[
-  {"index": 1, "score": 0.87, "document": "Feature engineering is often more important than model choice."},
-  {"index": 0, "score": 0.79, "document": "Always validate your models on a hold-out set."}
-]
-```
-
-### Embeddings
-
-```bash
-curl -X POST http://localhost:8000/v1/embeddings \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "bge-m3",
-    "input": ["First document", "Second document"]
-  }'
-```
-
-### Audio – Transcriptions (STT)
-
-```bash
-curl -X POST http://localhost:8000/v1/audio/transcriptions \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -F file="@audio.mp3" \
-  -F model="whisper-large-v3"
-```
-
-### Audio – Speech (TTS)
-
-```bash
-curl -X POST http://localhost:8000/v1/audio/speech \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "tts-1",
-    "input": "Hello world, this is a test.",
-    "voice": "alloy"
-  }' \
-  --output speech.mp3
-```
+All tests use mocked backends - no real servers required.
 
 ## Deployment (systemd)
 
-A ready-to-use unit file is included (`llmproxy.service`).
+Create a service file:
 
-Recommended setup:
+```ini
+[Unit]
+Description=BLProxy - Backend Locking Proxy
+After=network.target
 
-```bash
-sudo cp llmproxy.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now llmproxy
-sudo systemctl status llmproxy
+[Service]
+Type=simple
+User=noname
+WorkingDirectory=/src/blproxy
+ExecStart=/src/blproxy/.venv/bin/python -m src.blproxy.main -c /src/blproxy/config.yaml
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-The service file uses `-c` flag to specify config path.
+## Design Philosophy
 
-## Design Philosophy & Known Behaviors
+- **Transparency**: BLProxy tries to be invisible - status codes and streaming preserved
+- **Declarative**: All configuration in YAML, no code changes needed
+- **Efficient**: Connection pooling and streaming to minimize resource usage
+- **Robust**: Proper timeout handling and error propagation
 
-- **Transparency first**: The proxy tries hard to be invisible. Status codes, streaming format, and error shapes from the backends are preserved.
-- **Router mode is first-class**: First request to an unloaded model can take 20–35 seconds. Timeouts and error handling are tuned for this.
-- **Index correctness in rerank** is non-negotiable — clients must be able to map results back to their original documents.
-- **No magic**: If the backend returns 500 because a model is still loading, the proxy returns 500. This is the correct and expected behavior.
-- The project was built with a pragmatic, "vibe-coded but functional" approach for real internal use (RAG pipelines, Hindsight, local OpenAI-compatible clients).
+## License
 
 Apache License 2.0
 
 ---
 
-**LLM Proxy** — One clean API in front of many specialized LLM backends (chat, embeddings, rerank, STT, TTS).
+**BLProxy** - One clean API in front of many specialized AI backends with global resource locking.
