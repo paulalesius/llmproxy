@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LockProxy main entry point."""
+"""BLProxy main entry point."""
 
 import argparse
 import asyncio
@@ -11,7 +11,7 @@ from .proxy import LockProxy
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(description="LockProxy - Declarative backend proxy with global locking")
+    parser = argparse.ArgumentParser(description="BLProxy - Declarative backend proxy with global locking")
     parser.add_argument("--config", "-c", default="config.yaml", help="Path to config file")
     args = parser.parse_args()
     

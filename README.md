@@ -2,6 +2,8 @@
 
 A declarative backend proxy with global locking. Routes requests to configured backends and manages cross-backend resource locks.
 
+![Banner](banner.jpg)
+
 ## Purpose
 
 BLProxy solves the common problem of having **separate backends** for different AI capabilities:

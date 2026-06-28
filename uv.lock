@@ -40,6 +40,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "pydantic" },
     { name = "pyyaml" },
     { name = "uvicorn" },
 ]
@@ -55,6 +56,7 @@ test = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.109.0" },
     { name = "httpx", specifier = ">=0.26.0" },
+    { name = "pydantic", specifier = ">=2.5.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.4.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23.0" },
     { name = "pytest-httpx", marker = "extra == 'test'", specifier = ">=0.30.0" },

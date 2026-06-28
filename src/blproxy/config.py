@@ -1,74 +1,61 @@
-"""Configuration loading from YAML."""
+"""Configuration loading from YAML with Pydantic validation."""
 
-from dataclasses import dataclass, field
-from typing import Optional
+from pydantic import BaseModel, Field, AnyHttpUrl, field_validator, model_validator
+from typing import Any
 import yaml
 
 
-@dataclass
-class BackendConfig:
+class BackendConfig(BaseModel):
     """Backend configuration from YAML."""
-    url: str
-    paths: list[str]
-    locks: list[str] = field(default_factory=list)
+    url: AnyHttpUrl = Field(..., description="Backend server URL (must be http/https)")
+    paths: list[str] = Field(default_factory=list, description="Path patterns this backend handles")
+    locks: list[str] = Field(default_factory=list, description="Other backends to lock while processing")
+
+    @field_validator('paths', 'locks', mode='before')
+    @classmethod
+    def ensure_list(cls, v: Any) -> list[str]:
+        return v or []
 
 
-@dataclass
-class GlobalLockConfig:
+class GlobalLockConfig(BaseModel):
     """Global lock settings."""
-    enabled: bool = True
-    timeout: int = 300
+    enabled: bool = Field(default=True, description="Enable global locking")
+    timeout: int = Field(default=300, gt=0, description="Timeout in seconds when waiting for locks")
 
 
-@dataclass
-class ServerConfig:
+class ServerConfig(BaseModel):
     """Server configuration."""
-    host: str = "0.0.0.0"
-    port: int = 4001
+    host: str = Field(default="0.0.0.0", description="Host to bind to")
+    port: int = Field(default=4001, ge=1, le=65535, description="Port to listen on")
 
 
-@dataclass
-class Config:
-    """Full proxy configuration."""
-    server: ServerConfig = field(default_factory=ServerConfig)
-    backends: dict[str, BackendConfig] = field(default_factory=dict)
-    global_lock: GlobalLockConfig = field(default_factory=GlobalLockConfig)
+class Config(BaseModel):
+    """Full proxy configuration with validation."""
+    server: ServerConfig = Field(default_factory=ServerConfig)
+    backends: dict[str, BackendConfig] = Field(default_factory=dict)
+    global_lock: GlobalLockConfig = Field(default_factory=GlobalLockConfig)
+
+    @model_validator(mode='after')
+    def validate_lock_targets_exist(self) -> "Config":
+        """Ensure that all lock targets actually exist as backends."""
+        backend_names = set(self.backends.keys())
+        for name, backend in self.backends.items():
+            for lock in backend.locks:
+                if lock not in backend_names:
+                    raise ValueError(
+                        f"Backend '{name}' tries to lock '{lock}', "
+                        f"but no backend named '{lock}' exists."
+                    )
+        return self
 
     @classmethod
     def from_file(cls, path: str) -> "Config":
-        """Load config from YAML file."""
+        """Load config from YAML file with validation."""
         with open(path) as f:
-            data = yaml.safe_load(f)
-        return cls.from_dict(data)
+            data = yaml.safe_load(f) or {}
+        return cls.model_validate(data)
 
     @classmethod
     def from_dict(cls, data: dict) -> "Config":
-        """Load config from dict."""
-        config = cls()
-        
-        # Server config
-        if "server" in data:
-            server_data = data["server"]
-            config.server = ServerConfig(
-                host=server_data.get("host", "0.0.0.0"),
-                port=server_data.get("port", 4001)
-            )
-        
-        # Backends
-        if "backends" in data:
-            for name, backend_data in data["backends"].items():
-                config.backends[name] = BackendConfig(
-                    url=backend_data["url"],
-                    paths=backend_data.get("paths", []),
-                    locks=backend_data.get("locks", [])
-                )
-        
-        # Global lock config
-        if "global_lock" in data:
-            lock_data = data["global_lock"]
-            config.global_lock = GlobalLockConfig(
-                enabled=lock_data.get("enabled", True),
-                timeout=lock_data.get("timeout", 300)
-            )
-        
-        return config
+        """Load config from dict with validation."""
+        return cls.model_validate(data or {})
