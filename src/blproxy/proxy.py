@@ -1,14 +1,52 @@
 """BLProxy - routes requests to backends with global locking."""
 
 import asyncio
+import logging
+import time
+
 from dataclasses import dataclass
 from typing import Optional
+
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
 import httpx
 
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+
 from .backend import Backend
 from .config import Config
+
+logger = logging.getLogger("blproxy")
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """Middleware for logging all incoming HTTP requests and their final responses.
+    
+    Provides overview of every request with timing and status code.
+    Backend-specific details (routing, locks, errors) are logged in _handle_request.
+    """
+
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        start_time = time.time()
+        client_host = request.client.host if request.client else "-"
+        # Support X-Forwarded-For if behind reverse proxy
+        forwarded = request.headers.get("x-forwarded-for", client_host)
+
+        logger.info(
+            f"→ {request.method} {request.url.path} from {forwarded}"
+        )
+
+        response = await call_next(request)
+
+        process_time = (time.time() - start_time) * 1000  # milliseconds
+        logger.info(
+            f"← {request.method} {request.url.path} "
+            f"status={response.status_code} ({process_time:.0f}ms)"
+        )
+
+        return response
 
 
 @dataclass
@@ -95,6 +133,7 @@ class LockProxy:
         
         # Create FastAPI app
         self.app = FastAPI(title="BLProxy")
+        self.app.add_middleware(RequestLoggingMiddleware)
         self._setup_routes()
 
     def _setup_routes(self) -> None:
@@ -114,89 +153,120 @@ class LockProxy:
             return await self._handle_request(request, path)
 
     async def _handle_request(self, request: Request, path: str) -> Response:
-        """Handle incoming request - route to backend with locking."""
-        
-        # Find matching backend
+        """Handle incoming request - route to backend with locking and detailed logging."""
         full_path = f"/{path}"
+        start_time = time.time()
+
+        # Find matching backend
         backend: Optional[Backend] = None
-        
         for b in self.backends.values():
             if b.matches_path(full_path):
                 backend = b
                 break
-        
+
         if not backend:
-            # No backend matched - return 404
+            # Proxy-level 404 (no backend configured for this path)
+            logger.warning(f"No backend matched path: {full_path} → returning 404 from BLProxy")
             return Response(status_code=404, content=f"Unknown path: {full_path}")
-        
+
         # Get locks this backend needs
         lock_targets = backend.get_lock_targets(self.backends)
-        
-        # Acquire locks if enabled
+
+        # Acquire locks if enabled and configured
         acquired = True
         if self.lock_manager and lock_targets:
+            logger.info(f"Acquiring locks {lock_targets} for backend '{backend.name}'")
             acquired = await self.lock_manager.acquire(backend.name, lock_targets)
-        
+
         if not acquired:
-            # Timeout waiting for locks
+            logger.warning(
+                f"Lock timeout waiting for {lock_targets} (held by another backend) "
+                f"→ returning 503 for {full_path}"
+            )
             return Response(
                 status_code=503,
                 content=f"Backend {backend.name} is locked by another backend",
                 headers={"Retry-After": "10"}
             )
-        
+
         try:
-            # Forward request to backend
-            target_url = f"{backend.url}{full_path}"
-            
-            # Filter hop-by-hop headers
+            logger.info(f"Forwarding {request.method} {full_path} → {backend.name} ({backend.url})")
+
+            # Avoid double slashes (e.g. http://host:port//v1/models)
+            # Some llama.cpp servers are sensitive to this.
+            # Note: backend.url is Pydantic AnyHttpUrl → must convert to str first
+            target_url = f"{str(backend.url).rstrip('/')}{full_path}"
+
+            # Filter hop-by-hop headers (do not forward these)
             hop_by_hop = {"connection", "keep-alive", "transfer-encoding", "upgrade", "trailers"}
             filtered_headers = {
                 k: v for k, v in request.headers.items()
                 if k.lower() not in hop_by_hop
             }
-            
-            # Build request
+
             req = self.httpx_client.build_request(
                 method=request.method,
                 url=target_url,
                 headers=filtered_headers,
                 content=await request.body()
             )
-            
-            # Send with streaming
+
             response = await self.httpx_client.send(req, stream=True)
-            
-            # Stream response back (works for SSE and regular responses)
-            if response.headers.get("content-type") == "text/event-stream":
+
+            elapsed = time.time() - start_time
+            status_code = response.status_code
+            content_type = response.headers.get("content-type", "")
+
+            # Log backend response with distinction for errors
+            if status_code >= 500:
+                logger.error(
+                    f"Backend '{backend.name}' returned {status_code} for {full_path} "
+                    f"(took {elapsed:.3f}s)"
+                )
+            elif status_code >= 400:
+                logger.warning(
+                    f"Backend '{backend.name}' returned {status_code} for {full_path} "
+                    f"(took {elapsed:.3f}s)  ← this is from the backend, not BLProxy"
+                )
+            else:
+                logger.info(
+                    f"Backend '{backend.name}' responded {status_code} for {full_path} "
+                    f"(took {elapsed:.3f}s)"
+                )
+
+            if "text/event-stream" in content_type:
+                # SSE streaming (e.g. chat completions)
                 return StreamingResponse(
                     self._stream_sse(response.aiter_lines()),
-                    status_code=response.status_code,
+                    status_code=status_code,
+                    media_type="text/event-stream",
                     headers=dict(response.headers)
                 )
             else:
-                # For non-streaming, still stream to avoid buffering
+                # Regular response (embeddings, models, etc.)
                 return StreamingResponse(
                     self._stream_response(response.aiter_bytes()),
-                    status_code=response.status_code,
+                    status_code=status_code,
                     headers=dict(response.headers)
                 )
-        
+
         except httpx.TimeoutException as e:
+            logger.error(f"Backend '{backend.name}' timed out for {full_path}: {str(e)}")
             return Response(
                 status_code=504,
                 content=f"Backend {backend.name} timed out: {str(e)}"
             )
         except httpx.RequestError as e:
+            logger.error(f"Backend '{backend.name}' connection error for {full_path}: {str(e)}")
             return Response(
                 status_code=502,
                 content=f"Backend {backend.name} error: {str(e)}"
             )
-        
+
         finally:
-            # Release locks
             if self.lock_manager and lock_targets:
                 await self.lock_manager.release(backend.name, lock_targets)
+                logger.info(f"Released locks {lock_targets} for backend '{backend.name}'")
 
     async def _stream_sse(self, aiter_lines):
         """Stream SSE lines with proper formatting."""
@@ -220,7 +290,8 @@ class LockProxy:
             self.app,
             host=self.config.server.host,
             port=self.config.server.port,
-            log_level="info"
+            log_level="info",
+            access_log=False,  # We use our own RequestLoggingMiddleware for cleaner request logs
         )
         server = uvicorn.Server(config)
         try:

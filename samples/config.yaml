@@ -1,0 +1,69 @@
+server:
+  host: 0.0.0.0
+  port: 4001
+
+global_lock:
+  enabled: true
+  timeout: 300
+
+backends:
+
+  llm:
+    url: "http://127.0.0.1:8080"
+    paths:
+      # OpenAI
+      - "/v1/chat/completions"
+      - "/v1/completions"
+      - "/v1/models"
+      - "/v1/models/*"
+
+      # Ollama compatible
+      - "/api/tags"
+      - "/api/show"
+      - "/api/ps"
+      - "/api/v1/models"
+      - "/api/v1/models/*"
+
+      # llama.cpp specific
+      - "/v1/props"
+      - "/props"
+      - "/version"
+      - "/health"
+      - "/v1/tokenize"
+      - "/v1/detokenize"
+    locks: []
+
+  embed:
+    url: "http://127.0.0.1:8081"
+    paths:
+      - "/v1/embeddings"
+      - "/embeddings"
+    locks: []
+
+  rerank:
+    url: "http://127.0.0.1:8082"
+    paths:
+      - "/v1/rerank"
+      - "/rerank"
+      - "/v1/reranking"
+    locks: []
+
+  vision:
+    url: "http://127.0.0.1:8083"
+    paths:
+      - "/v1/vision/chat/completions"
+      - "/v1/vision/*"
+    locks: []
+
+  stt:
+    url: "http://127.0.0.1:8084"
+    paths:
+      - "/v1/audio/transcriptions"
+      - "/v1/audio/translations"
+    locks: []
+
+  tts:
+    url: "http://127.0.0.1:8085"
+    paths:
+      - "/v1/audio/speech"
+    locks: []

@@ -3,30 +3,46 @@
 
 import argparse
 import asyncio
+import logging
 import sys
 
 from .config import Config
 from .proxy import LockProxy
 
 
+def setup_logging() -> None:
+    """Configure logging for BLProxy."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    # Ensure our logger is at INFO level
+    logging.getLogger("blproxy").setLevel(logging.INFO)
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="BLProxy - Declarative backend proxy with global locking")
-    parser.add_argument("--config", "-c", default="config.yaml", help="Path to config file")
+    parser.add_argument("--config", "-c", default="config.yaml", required=True, help="Path to config file")
     args = parser.parse_args()
     
     try:
+        setup_logging()
+        logger = logging.getLogger("blproxy")
+        
         config = Config.from_file(args.config)
-        print(f"BLProxy v1.0.0")
-        print(f"Backends: {list(config.backends.keys())}")
-        print(f"Global locking: {'enabled' if config.global_lock.enabled else 'disabled'}")
-        print(f"Starting on {config.server.host}:{config.server.port}")
+        logger.info("BLProxy v1.0.0 starting up")
+        logger.info(f"Backends: {list(config.backends.keys())}")
+        logger.info(f"Global locking: {'enabled' if config.global_lock.enabled else 'disabled'}")
+        logger.info(f"Starting on {config.server.host}:{config.server.port}")
         
         proxy = LockProxy(config)
         asyncio.run(proxy.run())
         
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logger = logging.getLogger("blproxy")
+        logger.error(f"Error: {e}")
         sys.exit(1)
 
 
