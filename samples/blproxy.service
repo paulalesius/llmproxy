@@ -1,6 +1,6 @@
 [Unit]
 Description=BLProxy - Backend Locking Proxy
-After=network.target
+After=network.target llama-server.service llama-reranker.service llama-embeddings.service
 
 [Service]
 Type=simple
