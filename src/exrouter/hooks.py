@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 import asyncio
 
-logger = logging.getLogger("blproxy.hooks")
+logger = logging.getLogger("exrouter.hooks")
 
 
 @dataclass
@@ -51,6 +51,26 @@ class BackendHook:
         """Called after locks are released."""
         pass
 
+    def on_backend_activated(self, context: HookContext) -> Optional[dict]:
+        """Called when this backend transitions from idle to active 
+        (i.e. first request arrives after a period of no in-flight requests).
+        
+        Use this for expensive setup like starting systemd services,
+        loading models, or acquiring exclusive resources.
+        Subsequent requests to the same backend while it is active
+        will NOT trigger this again.
+        """
+        pass
+
+    def on_backend_deactivated(self, context: HookContext) -> Optional[dict]:
+        """Called when this backend transitions from active to idle
+        (i.e. the last in-flight request finishes).
+        
+        Use this for cleanup like stopping services to free resources (GPU/CPU/RAM)
+        when the backend is no longer needed.
+        """
+        pass
+
 
 class HookLoader:
     """Loads and manages hook scripts for backends."""
@@ -70,7 +90,7 @@ class HookLoader:
             return None
         
         try:
-            module_name = f"blproxy_hook_{backend_name}"
+            module_name = f"exrouter_hook_{backend_name}"
             spec = importlib.util.spec_from_file_location(module_name, path)
             if spec is None or spec.loader is None:
                 logger.error(f"Failed to load spec for hook script: {script_path}")

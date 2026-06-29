@@ -1,4 +1,4 @@
-# BLProxy - Backend Locking Proxy
+# EXRouter - Exclusive Router
 
 A declarative backend proxy with global locking. Routes requests to configured backends and manages cross-backend resource locks.
 
@@ -30,7 +30,7 @@ Instead of clients talking to many different ports, BLProxy offers a single endp
 
 ```
                      ┌─────────────────────────────┐
-                     │         BLProxy              │
+                     │         EXRouter            │
                      │   (FastAPI on :4001)        │
                      └──────────────┬──────────────┘
                                     │
@@ -124,10 +124,10 @@ backends:
 
 Hook scripts allow custom code to run at specific points in the request lifecycle.
 
-Create a Python file that defines a `BackendHook` class inheriting from `blproxy.hooks.BackendHook`:
+Create a Python file that defines a `BackendHook` class inheriting from `exrouter.hooks.BackendHook`:
 
 ```python
-from blproxy.hooks import BackendHook, HookContext
+from exrouter.hooks import BackendHook, HookContext
 
 class BackendHook:
     def on_locks_acquired(self, context: HookContext) -> None:
@@ -152,16 +152,29 @@ class BackendHook:
 ```
 
 Hook lifecycle order:
-1. `on_locks_acquired()` - Global locks acquired
-2. `on_before_request()` - About to send request to backend
-3. Request sent to backend
-4. `on_response()` - Response received from backend
-5. `on_after_request()` - Request complete, about to release locks
-6. `on_locks_released()` - Locks released
 
-Hooks can be sync or async. The `HookContext` object contains all request/response details.
+**Per-request hooks** (run on every request):
+1. `on_locks_acquired()`
+2. `on_before_request()`
+3. Request forwarded to backend
+4. `on_response()`
+5. `on_after_request()`
+6. `on_locks_released()`
 
-See `examples/hook_example.py` for a complete working example.
+**Backend lifecycle hooks** (recommended for service management):
+- `on_backend_activated()` — first request after idle period
+- `on_backend_deactivated()` — last request finished, backend now idle
+
+**Backend lifecycle hooks (strongly recommended for service/resource management)**
+
+These fire based on backend *activity level*, not per request. This is the cleanest way to start/stop systemd services when you have limited VRAM/GPU (e.g. `llm` and `stt_custom` cannot run at the same time).
+
+- `on_backend_activated(context)` — Backend went from idle → active (first request after being quiet). Use this to start the required service and stop conflicting ones. Runs **only once** even if the backend then handles 50 concurrent or sequential requests to different paths.
+- `on_backend_deactivated(context)` — Last in-flight request finished and backend is now idle. Use this to stop the service and free resources.
+
+See the complete, ready-to-use example in `samples/hook.py` — it implements exactly the `llm` ↔ `stt_custom` switching pattern you need.
+
+This approach is far cleaner and more efficient than putting `systemctl` calls inside `on_before_request`.
 
 ### Global Lock Settings
 
@@ -170,13 +183,38 @@ See `examples/hook_example.py` for a complete working example.
 
 ## How Locking Works
 
-1. When a request arrives, BLProxy finds the matching backend
-2. If the backend has `locks` configured, BLProxy acquires those locks
-3. If locks are held by another backend, BLProxy waits up to `timeout` seconds
-4. Request is forwarded to the backend
-5. Locks are released after response is complete
+EXRouter's locking is designed to prevent conflicting backends from running at the same time while still allowing natural concurrency inside the same backend.
 
-**Example**: If `llm` locks `embed`, and an LLM request is processing, all embedding requests will wait until the LLM request completes.
+### Key Rules
+
+1. When a request arrives for a backend, EXRouter acquires the locks declared in that backend's `locks:` list.
+2. **Re-entrant per backend**: Multiple concurrent requests to the *same* backend never block each other on locks, even if the backend declares locks on other backends. This is important for long-running requests (e.g. streaming chat completions) + follow-up requests (`/v1/models`, health checks, etc.).
+3. A request to a *different* backend will wait if it tries to acquire a target that is currently held by another backend.
+4. Locks are released only after the request finishes (including streaming).
+5. If a backend declares no locks (`locks: []`), its requests never wait on the global lock system.
+
+**Practical example with limited VRAM** (llm + stt_custom that cannot run together):
+
+```yaml
+backends:
+  llm:
+    url: http://127.0.0.1:8080
+    paths: ["/v1/chat/completions", "/v1/models", ...]
+    locks: [stt_custom]          # llm wants exclusive access to stt_custom's resources
+    script: /path/to/hook.py
+
+  stt_custom:
+    url: http://127.0.0.1:8091
+    paths: ["/transcribe"]
+    locks: [llm]
+    script: /path/to/hook.py
+```
+
+- Multiple requests to `llm` paths can run concurrently.
+- A request to `stt_custom` while `llm` is active will wait (or trigger activation logic).
+- The actual start/stop of systemd services is handled in the hook (see below).
+
+Locks give you a declarative way to express "these two backends conflict".
 
 ## Response Handling
 
@@ -199,14 +237,14 @@ Create a service file:
 
 ```ini
 [Unit]
-Description=BLProxy - Backend Locking Proxy
+Description=EXRouter - Exclusive Router
 After=network.target
 
 [Service]
 Type=simple
 User=noname
-WorkingDirectory=/src/blproxy
-ExecStart=/src/blproxy/.venv/bin/python -m src.blproxy.main -c /src/blproxy/config.yaml
+WorkingDirectory=/src/exrouter
+ExecStart=/src/exrouter/.venv/bin/python -m src.exrouter.main -c /src/exrouter/config.yaml
 Restart=always
 
 [Install]
@@ -215,7 +253,7 @@ WantedBy=multi-user.target
 
 ## Design Philosophy
 
-- **Transparency**: BLProxy tries to be invisible - status codes and streaming preserved
+- **Transparency**: EXRouter tries to be invisible - status codes and streaming preserved
 - **Declarative**: All configuration in YAML, no code changes needed
 - **Efficient**: Connection pooling and streaming to minimize resource usage
 - **Robust**: Proper timeout handling and error propagation
@@ -226,4 +264,4 @@ Apache License 2.0
 
 ---
 
-**BLProxy** - One clean API in front of many specialized AI backends with global resource locking.
+**EXRouter** - One clean API in front of many specialized AI backends with global resource locking.

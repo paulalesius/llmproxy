@@ -1,4 +1,4 @@
-"""BLProxy - routes requests to backends with global locking."""
+"""EXRouter - routes requests to backends with global locking."""
 
 import asyncio
 import logging
@@ -17,7 +17,7 @@ from .backend import Backend
 from .config import Config
 from .hooks import HookLoader, HookContext
 
-logger = logging.getLogger("blproxy")
+logger = logging.getLogger("exrouter")
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -68,26 +68,34 @@ class LockManager:
     async def acquire(self, backend_name: str, lock_targets: list[str]) -> bool:
         """Acquire locks on specified backends.
         
-        Waits efficiently using Condition until all targets are free or timeout occurs.
+        Waits efficiently using Condition until all targets are free **or already held by this same backend**.
+        This makes locking re-entrant per backend: multiple concurrent requests to the *same* backend
+        do not block each other, even if the backend declares locks on other backends.
+        
+        Only requests from a *different* conflicting backend will wait.
+        
         Returns True if locks were acquired, False if timeout.
         """
         async with self.condition:
             try:
                 await asyncio.wait_for(
-                    self._wait_until_free(lock_targets),
+                    self._wait_until_free(backend_name, lock_targets),
                     timeout=self.timeout
                 )
             except asyncio.TimeoutError:
                 return False
 
-            # All targets are now free – acquire them atomically
+            # All targets are now free (or already ours) – (re)acquire them
             for target in lock_targets:
                 self.locks[target] = LockState(locked_by=backend_name)
             return True
 
-    async def _wait_until_free(self, lock_targets: list[str]) -> None:
-        """Wait (inside condition) until none of the lock_targets are currently locked."""
-        while any(target in self.locks for target in lock_targets):
+    async def _wait_until_free(self, backend_name: str, lock_targets: list[str]) -> None:
+        """Wait (inside condition) until none of the lock_targets are locked by *another* backend."""
+        while any(
+            target in self.locks and self.locks[target].locked_by != backend_name
+            for target in lock_targets
+        ):
             await self.condition.wait()
 
     async def release(self, backend_name: str, lock_targets: list[str]) -> None:
@@ -133,6 +141,10 @@ class LockProxy:
             if backend.script:
                 self.hook_loader.load_script(backend.name, backend.script)
         
+        # Track in-flight requests per backend for lifecycle hooks
+        # (on_backend_activated / on_backend_deactivated)
+        self.active_counts: dict[str, int] = {name: 0 for name in self.backends}
+        
         # Shared httpx client for connection pooling
         self.httpx_client = httpx.AsyncClient(
             limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
@@ -140,7 +152,7 @@ class LockProxy:
         )
         
         # Create FastAPI app
-        self.app = FastAPI(title="BLProxy")
+        self.app = FastAPI(title="EXRouter")
         self.app.add_middleware(RequestLoggingMiddleware)
         self._setup_routes()
 
@@ -149,7 +161,7 @@ class LockProxy:
         
         @self.app.get("/")
         async def root():
-            return {"name": "BLProxy", "version": "1.0.0"}
+            return {"name": "EXRouter", "version": "1.0.0"}
         
         @self.app.get("/health")
         async def health():
@@ -174,7 +186,7 @@ class LockProxy:
 
         if not backend:
             # Proxy-level 404 (no backend configured for this path)
-            logger.warning(f"No backend matched path: {full_path} → returning 404 from BLProxy")
+            logger.warning(f"No backend matched path: {full_path} → returning 404 from EXRouter")
             return Response(status_code=404, content=f"Unknown path: {full_path}")
 
         # Get locks this backend needs
@@ -197,7 +209,7 @@ class LockProxy:
                 headers={"Retry-After": "10"}
             )
 
-        # Prepare hook context
+        # Prepare hook context (needed for lifecycle hooks too)
         request_body = await request.body()
         hook_context = HookContext(
             backend_name=backend.name,
@@ -206,6 +218,20 @@ class LockProxy:
             request_headers=dict(request.headers),
             request_body=request_body
         )
+
+        # Backend activation tracking (for on_backend_activated / on_backend_deactivated)
+        # This ensures expensive operations (e.g. starting services) only happen
+        # when the backend goes from idle → active, not on every individual request.
+        # Works correctly even with lock contention (serialized requests to same backend).
+        was_active = self.active_counts.get(backend.name, 0) > 0
+        self.active_counts[backend.name] = self.active_counts.get(backend.name, 0) + 1
+        if not was_active:
+            if backend.script:
+                await self.hook_loader.call_hook(
+                    self.hook_loader.get_hook(backend.name),
+                    "on_backend_activated",
+                    hook_context
+                )
 
         try:
             # Call on_locks_acquired hook
@@ -272,7 +298,7 @@ class LockProxy:
             elif status_code >= 400:
                 logger.warning(
                     f"Backend '{backend.name}' returned {status_code} for {full_path} "
-                    f"(took {elapsed:.3f}s)  ← this is from the backend, not BLProxy"
+                    f"(took {elapsed:.3f}s)  ← this is from the backend, not EXRouter"
                 )
             else:
                 logger.info(
@@ -331,6 +357,18 @@ class LockProxy:
                     "on_locks_released",
                     hook_context
                 )
+
+            # Backend deactivation tracking
+            # Called when the last in-flight request for this backend finishes.
+            self.active_counts[backend.name] = self.active_counts.get(backend.name, 1) - 1
+            if self.active_counts[backend.name] <= 0:
+                self.active_counts[backend.name] = 0
+                if backend.script:
+                    await self.hook_loader.call_hook(
+                        self.hook_loader.get_hook(backend.name),
+                        "on_backend_deactivated",
+                        hook_context
+                    )
 
     async def _stream_sse(self, aiter_lines):
         """Stream SSE lines with proper formatting."""

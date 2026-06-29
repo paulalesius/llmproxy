@@ -1,0 +1,21 @@
+[Unit]
+Description=EXRouter - Exclusive Router
+After=network.target llama-server.service llama-reranker.service llama-embeddings.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment=UV_PROJECT_ENVIRONMENT=/home/noname/venv-exrouter
+WorkingDirectory=/src/exrouter
+ExecStart=/usr/bin/env /usr/local/bin/uv run --project /src/exrouter python -m src.exrouter.main --config /src/exrouter/samples/config.yaml
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=blproxy
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+
