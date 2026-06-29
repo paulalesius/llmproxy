@@ -31,7 +31,18 @@ backends:
       - "/health"
       - "/v1/tokenize"
       - "/v1/detokenize"
-    locks: []
+    locks: [stt_custom]
+
+  # stt_custom is a custom endpoint that takes a POST
+  # request to /transcribe and returns the result. It locks
+  # the llm backend because it needs its resources, the script
+  # will stop the llm.service and start stt_custom.service before
+  # entering the backend.
+  stt_custom:
+    url: "http://127.0.0.1:8091"
+    paths:
+      - "/transcribe"
+    locks: [llm]
 
   embed:
     url: "http://127.0.0.1:8081"

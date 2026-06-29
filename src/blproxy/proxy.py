@@ -15,6 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 
 from .backend import Backend
 from .config import Config
+from .hooks import HookLoader, HookContext
 
 logger = logging.getLogger("blproxy")
 
@@ -114,9 +115,10 @@ class LockProxy:
         for name, backend_config in config.backends.items():
             self.backends[name] = Backend(
                 name=name,
-                url=backend_config.url,
+                url=str(backend_config.url),
                 paths=backend_config.paths,
-                locks=backend_config.locks
+                locks=backend_config.locks,
+                script=backend_config.script
             )
         
         # Initialize lock manager
@@ -124,6 +126,12 @@ class LockProxy:
             self.backends,
             timeout=config.global_lock.timeout
         ) if config.global_lock.enabled else None
+        
+        # Initialize hook loader and load all scripts
+        self.hook_loader = HookLoader()
+        for backend in self.backends.values():
+            if backend.script:
+                self.hook_loader.load_script(backend.name, backend.script)
         
         # Shared httpx client for connection pooling
         self.httpx_client = httpx.AsyncClient(
@@ -189,7 +197,33 @@ class LockProxy:
                 headers={"Retry-After": "10"}
             )
 
+        # Prepare hook context
+        request_body = await request.body()
+        hook_context = HookContext(
+            backend_name=backend.name,
+            request_method=request.method,
+            request_path=full_path,
+            request_headers=dict(request.headers),
+            request_body=request_body
+        )
+
         try:
+            # Call on_locks_acquired hook
+            if backend.script:
+                await self.hook_loader.call_hook(
+                    self.hook_loader.get_hook(backend.name),
+                    "on_locks_acquired",
+                    hook_context
+                )
+
+            # Call on_before_request hook
+            if backend.script:
+                await self.hook_loader.call_hook(
+                    self.hook_loader.get_hook(backend.name),
+                    "on_before_request",
+                    hook_context
+                )
+
             logger.info(f"Forwarding {request.method} {full_path} → {backend.name} ({backend.url})")
 
             # Avoid double slashes (e.g. http://host:port//v1/models)
@@ -208,7 +242,7 @@ class LockProxy:
                 method=request.method,
                 url=target_url,
                 headers=filtered_headers,
-                content=await request.body()
+                content=request_body
             )
 
             response = await self.httpx_client.send(req, stream=True)
@@ -216,6 +250,18 @@ class LockProxy:
             elapsed = time.time() - start_time
             status_code = response.status_code
             content_type = response.headers.get("content-type", "")
+
+            # Update hook context with response info
+            hook_context.response_status = status_code
+            hook_context.response_headers = dict(response.headers)
+
+            # Call on_response hook
+            if backend.script:
+                await self.hook_loader.call_hook(
+                    self.hook_loader.get_hook(backend.name),
+                    "on_response",
+                    hook_context
+                )
 
             # Log backend response with distinction for errors
             if status_code >= 500:
@@ -251,12 +297,14 @@ class LockProxy:
                 )
 
         except httpx.TimeoutException as e:
+            hook_context.error = f"Timeout: {str(e)}"
             logger.error(f"Backend '{backend.name}' timed out for {full_path}: {str(e)}")
             return Response(
                 status_code=504,
                 content=f"Backend {backend.name} timed out: {str(e)}"
             )
         except httpx.RequestError as e:
+            hook_context.error = f"RequestError: {str(e)}"
             logger.error(f"Backend '{backend.name}' connection error for {full_path}: {str(e)}")
             return Response(
                 status_code=502,
@@ -264,9 +312,25 @@ class LockProxy:
             )
 
         finally:
+            # Call on_after_request hook before releasing locks
+            if backend.script:
+                await self.hook_loader.call_hook(
+                    self.hook_loader.get_hook(backend.name),
+                    "on_after_request",
+                    hook_context
+                )
+
             if self.lock_manager and lock_targets:
                 await self.lock_manager.release(backend.name, lock_targets)
                 logger.info(f"Released locks {lock_targets} for backend '{backend.name}'")
+
+            # Call on_locks_released hook
+            if backend.script:
+                await self.hook_loader.call_hook(
+                    self.hook_loader.get_hook(backend.name),
+                    "on_locks_released",
+                    hook_context
+                )
 
     async def _stream_sse(self, aiter_lines):
         """Stream SSE lines with proper formatting."""

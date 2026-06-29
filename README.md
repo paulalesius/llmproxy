@@ -105,6 +105,63 @@ Each backend specifies:
 - `url`: Backend server URL
 - `paths`: List of path patterns (supports wildcards like `/v1/vision/*`)
 - `locks`: List of other backend names to lock while processing
+- `script` (optional): Path to Python hook script for lifecycle callbacks
+
+Example with hook script:
+
+```yaml
+backends:
+  embed:
+    url: http://127.0.0.1:8081
+    paths:
+      - /v1/embeddings
+      - /embeddings
+    locks: []
+    script: /path/to/embed_hooks.py
+```
+
+### Hook Scripts
+
+Hook scripts allow custom code to run at specific points in the request lifecycle.
+
+Create a Python file that defines a `BackendHook` class inheriting from `blproxy.hooks.BackendHook`:
+
+```python
+from blproxy.hooks import BackendHook, HookContext
+
+class BackendHook:
+    def on_locks_acquired(self, context: HookContext) -> None:
+        """Called after locks are acquired, before request to backend."""
+        print(f"Locks acquired for {context.backend_name}")
+    
+    def on_before_request(self, context: HookContext) -> None:
+        """Called right before request is sent to backend."""
+        # Access context.request_method, context.request_path, context.request_headers, context.request_body
+    
+    def on_response(self, context: HookContext) -> None:
+        """Called after response is received from backend."""
+        # Access context.response_status, context.response_headers
+    
+    def on_after_request(self, context: HookContext) -> None:
+        """Called after request processing, before locks are released."""
+        # Access context.error if request failed
+    
+    def on_locks_released(self, context: HookContext) -> None:
+        """Called after locks are released."""
+        pass
+```
+
+Hook lifecycle order:
+1. `on_locks_acquired()` - Global locks acquired
+2. `on_before_request()` - About to send request to backend
+3. Request sent to backend
+4. `on_response()` - Response received from backend
+5. `on_after_request()` - Request complete, about to release locks
+6. `on_locks_released()` - Locks released
+
+Hooks can be sync or async. The `HookContext` object contains all request/response details.
+
+See `examples/hook_example.py` for a complete working example.
 
 ### Global Lock Settings
 

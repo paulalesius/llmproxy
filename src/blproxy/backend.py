@@ -14,11 +14,13 @@ class Backend:
     - url: Backend server URL
     - paths: List of path patterns this backend handles
     - locks: List of other backend names to lock while processing
+    - script: Optional path to hook script
     """
     name: str
     url: str
     paths: list[str]
     locks: list[str]
+    script: Optional[str] = None
 
     def matches_path(self, path: str) -> bool:
         """Check if this backend handles the given path."""

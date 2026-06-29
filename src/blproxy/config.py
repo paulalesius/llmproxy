@@ -1,7 +1,7 @@
 """Configuration loading from YAML with Pydantic validation."""
 
 from pydantic import BaseModel, Field, AnyHttpUrl, field_validator, model_validator
-from typing import Any
+from typing import Any, Optional
 import yaml
 
 
@@ -10,6 +10,7 @@ class BackendConfig(BaseModel):
     url: AnyHttpUrl = Field(..., description="Backend server URL (must be http/https)")
     paths: list[str] = Field(default_factory=list, description="Path patterns this backend handles")
     locks: list[str] = Field(default_factory=list, description="Other backends to lock while processing")
+    script: Optional[str] = Field(default=None, description="Path to Python hook script")
 
     @field_validator('paths', 'locks', mode='before')
     @classmethod
