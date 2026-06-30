@@ -50,7 +50,7 @@ backends:
   # we use a remapper to remap to llama-server paths
   embed:
     url: "http://127.0.0.1:8081"
-    remapper: "/src/exrouter/samples/llama-server-tei-remapper.py"
+    remapper: "/src/exrouter/samples/llama-server-embedding-tei-remapper.py"
     paths:
       - "/v1/info"
       - "/v1/embed"
@@ -62,6 +62,7 @@ backends:
 
   rerank:
     url: "http://127.0.0.1:8082"
+    remapper: "/src/exrouter/samples/llama-server-rerank-tei-remapper.py"
     paths:
       - "/v1/rerank"
       - "/rerank"
