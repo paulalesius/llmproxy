@@ -4,8 +4,8 @@ After=network.target llama-server.service llama-reranker.service llama-embedding
 
 [Service]
 Type=simple
-User=noname
-Group=noname
+User=root
+Group=root
 Environment=UV_PROJECT_ENVIRONMENT=/home/noname/venv-exrouter
 WorkingDirectory=/src/exrouter
 ExecStart=/usr/bin/env /usr/local/bin/uv run --project /src/exrouter python -m src.exrouter.main --config /src/exrouter/samples/config.yaml

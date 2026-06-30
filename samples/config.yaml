@@ -46,11 +46,18 @@ backends:
     script: "/src/exrouter/samples/hook.py"
     locks: [llm]
 
+  # Demonstration of a llama-server, the paths are TEI paths, but
+  # we use a remapper to remap to llama-server paths
   embed:
     url: "http://127.0.0.1:8081"
+    remapper: "/src/exrouter/samples/llama-server-tei-remapper.py"
     paths:
+      - "/v1/info"
+      - "/v1/embed"
+      - "/embed"
       - "/v1/embeddings"
       - "/embeddings"
+      - "/v1/models"
     locks: []
 
   rerank:
