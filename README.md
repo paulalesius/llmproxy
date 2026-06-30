@@ -1,30 +1,27 @@
 # EXRouter - Exclusive Router
 
-A declarative backend proxy with global locking. Routes requests to configured backends and manages cross-backend resource locks.
+A declarative backend proxy with global locking and request remapping. Routes requests to configured backends and manages cross-backend resource locks.
 
 ![Banner](banner2.jpg)
 
 ## Purpose
 
-EXRouter solves the common problem of having **separate backends** for different AI capabilities:
+EXRouter solves the common problem of having **separate backends** for different AI capabilities while providing a single, clean API in front of them.
 
-- One llama-server for chat & completions (router mode)
-- One dedicated server for embeddings
-- One server for reranking (TEI-compatible)
-- Optional STT / TTS backends
-- Any custom HTTP services that need resource coordination
-
-Instead of clients talking to many different ports, EXRouter offers a single endpoint with transparent request forwarding and **global locking** to prevent resource contention.
+It supports advanced routing needs through **request remapping**, allowing you to expose TEI-style endpoints on top of `llama-server --embeddings`, rewrite paths, normalize request formats between different APIs, and more — all declaratively.
 
 ## Key Features
 
 - **Declarative Backend Configuration**: Define backends in YAML with paths and locks
-- **Global Locking**: Backends can lock other backends while processing
-- **Connection Pooling**: Shared httpx client for efficient connections
+- **Global Locking**: Backends can lock other backends while processing (with proper re-entrancy)
+- **Request Remapping**: Per-backend Python scripts that can rewrite paths, fix request bodies, switch backends, or short-circuit responses
+- **TEI Compatibility**: Easily expose TEI-style endpoints (`/v1/embed`, `/v1/info`) on top of `llama-server --embeddings`
+- **Connection Pooling**: Shared `httpx` client for efficient connections
 - **Streaming Support**: SSE and regular responses streamed without buffering
-- **Timeout Handling**: Configurable lock timeouts with 503 + Retry-After
+- **Timeout Handling**: Configurable lock timeouts with `503 + Retry-After`
 - **Hop-by-Hop Header Filtering**: Proper HTTP proxy behavior
-- **Error Propagation**: Backend errors (4xx, 5xx) forwarded correctly
+- **Lifecycle Hooks**: Run custom code on backend activation/deactivation (ideal for managing systemd services)
+- **Error Propagation**: Backend HTTP status codes are forwarded correctly
 
 ## Architecture
 
@@ -65,10 +62,9 @@ server:
   host: 0.0.0.0
   port: 4001
 
-# Global lock settings
 global_lock:
   enabled: true
-  timeout: 300  # seconds to wait for locks
+  timeout: 300
 
 backends:
   llm:
@@ -79,23 +75,15 @@ backends:
       - /v1/models
     locks:
       - embed
-      - rerank
 
   embed:
     url: http://127.0.0.1:8081
     paths:
       - /v1/embeddings
-    locks:
-      - llm
-
-  rerank:
-    url: http://127.0.0.1:8082
-    paths:
-      - /v1/rerank
-      - /rerank
-    locks:
-      - llm
-      - embed
+      - /v1/embed
+      - /v1/info
+    remapper: /path/to/tei_remapper.py
+    locks: []
 ```
 
 ### Backend Configuration
@@ -106,75 +94,65 @@ Each backend specifies:
 - `paths`: List of path patterns (supports wildcards like `/v1/vision/*`)
 - `locks`: List of other backend names to lock while processing
 - `script` (optional): Path to Python hook script for lifecycle callbacks
+- `remapper` (optional): Path to Python request remapper script
 
-Example with hook script:
+### Request Remappers
 
-```yaml
-backends:
-  embed:
-    url: http://127.0.0.1:8081
-    paths:
-      - /v1/embeddings
-      - /embeddings
-    locks: []
-    script: /path/to/embed_hooks.py
+Request remappers allow you to intercept and transform requests **before** they reach a backend. This is powerful for API compatibility.
+
+Create a Python file that defines a `RequestRemapper` class:
+
+```python
+from exrouter.remapper import RequestRemapper, RemapResult
+from exrouter.hooks import HookContext
+import json
+
+class RequestRemapper:
+    async def remap(self, context: HookContext) -> RemapResult | None:
+        path = context.request_path.lower()
+
+        if path == "/v1/info":
+            return RemapResult(
+                status_code=200,
+                content=json.dumps({"model_id": "my-model"}).encode(),
+                response_headers={"content-type": "application/json"}
+            )
+
+        if path == "/v1/embed":
+            # Rewrite path and fix body format
+            data = json.loads(context.request_body or b"{}")
+            if "inputs" in data:
+                data["input"] = data.pop("inputs")
+
+            return RemapResult(path="/v1/embeddings", body=json.dumps(data).encode())
+
+        return None
 ```
+
+Remappers can:
+- Rewrite the request path
+- Change the target backend
+- Modify headers and body
+- Return a direct response (short-circuit)
 
 ### Hook Scripts
 
-Hook scripts allow custom code to run at specific points in the request lifecycle.
+Hook scripts allow custom code to run at specific points in the request lifecycle or backend lifecycle.
 
-Create a Python file that defines a `BackendHook` class inheriting from `exrouter.hooks.BackendHook`:
+Create a Python file that defines a `BackendHook` class:
 
 ```python
 from exrouter.hooks import BackendHook, HookContext
 
 class BackendHook:
-    def on_locks_acquired(self, context: HookContext) -> None:
-        """Called after locks are acquired, before request to backend."""
-        print(f"Locks acquired for {context.backend_name}")
-    
-    def on_before_request(self, context: HookContext) -> None:
-        """Called right before request is sent to backend."""
-        # Access context.request_method, context.request_path, context.request_headers, context.request_body
-    
-    def on_response(self, context: HookContext) -> None:
-        """Called after response is received from backend."""
-        # Access context.response_status, context.response_headers
-    
-    def on_after_request(self, context: HookContext) -> None:
-        """Called after request processing, before locks are released."""
-        # Access context.error if request failed
-    
-    def on_locks_released(self, context: HookContext) -> None:
-        """Called after locks are released."""
-        pass
+    def on_backend_activated(self, context: HookContext) -> None:
+        print(f"Backend {context.backend_name} activated")
+
+    def on_backend_deactivated(self, context: HookContext) -> None:
+        print(f"Backend {context.backend_name} deactivated")
+
+    # Other lifecycle methods available...
 ```
-
-Hook lifecycle order:
-
-**Per-request hooks** (run on every request):
-1. `on_locks_acquired()`
-2. `on_before_request()`
-3. Request forwarded to backend
-4. `on_response()`
-5. `on_after_request()`
-6. `on_locks_released()`
-
-**Backend lifecycle hooks** (recommended for service management):
-- `on_backend_activated()` — first request after idle period
-- `on_backend_deactivated()` — last request finished, backend now idle
-
-**Backend lifecycle hooks (strongly recommended for service/resource management)**
-
-These fire based on backend *activity level*, not per request. This is the cleanest way to start/stop systemd services when you have limited VRAM/GPU (e.g. `llm` and `stt_custom` cannot run at the same time).
-
-- `on_backend_activated(context)` — Backend went from idle → active (first request after being quiet). Use this to start the required service and stop conflicting ones. Runs **only once** even if the backend then handles 50 concurrent or sequential requests to different paths.
-- `on_backend_deactivated(context)` — Last in-flight request finished and backend is now idle. Use this to stop the service and free resources.
-
-See the complete, ready-to-use example in `samples/hook.py` — it implements exactly the `llm` ↔ `stt_custom` switching pattern you need.
-
-This approach is far cleaner and more efficient than putting `systemctl` calls inside `on_before_request`.
 
 ### Global Lock Settings
 
@@ -183,45 +161,18 @@ This approach is far cleaner and more efficient than putting `systemctl` calls i
 
 ## How Locking Works
 
-EXRouter's locking is designed to prevent conflicting backends from running at the same time while still allowing natural concurrency inside the same backend.
+EXRouter's locking prevents conflicting backends from running at the same time while still allowing natural concurrency inside the same backend.
 
-### Key Rules
-
-1. When a request arrives for a backend, EXRouter acquires the locks declared in that backend's `locks:` list.
-2. **Re-entrant per backend**: Multiple concurrent requests to the *same* backend never block each other on locks, even if the backend declares locks on other backends. This is important for long-running requests (e.g. streaming chat completions) + follow-up requests (`/v1/models`, health checks, etc.).
-3. A request to a *different* backend will wait if it tries to acquire a target that is currently held by another backend.
-4. Locks are released only after the request finishes (including streaming).
-5. If a backend declares no locks (`locks: []`), its requests never wait on the global lock system.
-
-**Practical example with limited VRAM** (llm + stt_custom that cannot run together):
-
-```yaml
-backends:
-  llm:
-    url: http://127.0.0.1:8080
-    paths: ["/v1/chat/completions", "/v1/models", ...]
-    locks: [stt_custom]          # llm wants exclusive access to stt_custom's resources
-    script: /path/to/hook.py
-
-  stt_custom:
-    url: http://127.0.0.1:8091
-    paths: ["/transcribe"]
-    locks: [llm]
-    script: /path/to/hook.py
-```
-
-- Multiple requests to `llm` paths can run concurrently.
-- A request to `stt_custom` while `llm` is active will wait (or trigger activation logic).
-- The actual start/stop of systemd services is handled in the hook (see below).
-
-Locks give you a declarative way to express "these two backends conflict".
+**Key Rules:**
+- Multiple concurrent requests to the *same* backend never block each other.
+- A request to a *different* backend will wait if it tries to acquire a target currently held by another backend.
+- Locks are released only after the request finishes (including streaming).
 
 ## Response Handling
 
-- **SSE (Server-Sent Events)**: Streamed line-by-line for chat completions
-- **Regular responses**: Streamed byte-by-byte to avoid buffering
-- **Timeouts**: Configurable (300s default, 30s connect)
-- **Errors**: Backend HTTP status codes forwarded (400, 429, 500, 504, etc.)
+- **SSE (Server-Sent Events)**: Streamed line-by-line
+- **Regular responses**: Streamed byte-by-byte
+- Backend HTTP status codes (including 4xx and 5xx) are forwarded correctly
 
 ## Testing
 
@@ -229,11 +180,9 @@ Locks give you a declarative way to express "these two backends conflict".
 uv run pytest tests/ -v
 ```
 
-All tests use mocked backends - no real servers required.
-
 ## Deployment (systemd)
 
-Create a service file:
+Example service file:
 
 ```ini
 [Unit]
@@ -253,15 +202,11 @@ WantedBy=multi-user.target
 
 ## Design Philosophy
 
-- **Transparency**: EXRouter tries to be invisible - status codes and streaming preserved
-- **Declarative**: All configuration in YAML, no code changes needed
-- **Efficient**: Connection pooling and streaming to minimize resource usage
-- **Robust**: Proper timeout handling and error propagation
+- **Transparency**: EXRouter tries to be invisible — status codes and streaming are preserved
+- **Declarative**: All configuration lives in YAML
+- **Extensible**: Remappers and hooks allow deep customization without changing core logic
+- **Efficient**: Connection pooling and streaming minimize resource usage
 
 ## License
 
 Apache License 2.0
-
----
-
-**EXRouter** - One clean API in front of many specialized AI backends with global resource locking.
