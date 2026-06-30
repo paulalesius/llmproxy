@@ -6,7 +6,7 @@ A declarative backend proxy with global locking. Routes requests to configured b
 
 ## Purpose
 
-BLProxy solves the common problem of having **separate backends** for different AI capabilities:
+EXRouter solves the common problem of having **separate backends** for different AI capabilities:
 
 - One llama-server for chat & completions (router mode)
 - One dedicated server for embeddings
@@ -14,7 +14,7 @@ BLProxy solves the common problem of having **separate backends** for different 
 - Optional STT / TTS backends
 - Any custom HTTP services that need resource coordination
 
-Instead of clients talking to many different ports, BLProxy offers a single endpoint with transparent request forwarding and **global locking** to prevent resource contention.
+Instead of clients talking to many different ports, EXRouter offers a single endpoint with transparent request forwarding and **global locking** to prevent resource contention.
 
 ## Key Features
 
@@ -49,11 +49,11 @@ Instead of clients talking to many different ports, BLProxy offers a single endp
 ## Quick Start
 
 ```bash
-cd /src/blproxy
+cd /src/exrouter
 uv sync
 
 # Edit config.yaml or use your own
-uv run python -m src.blproxy.main -c /path/to/config.yaml
+uv run python -m src.exrouter.main -c /path/to/config.yaml
 ```
 
 ## Configuration
