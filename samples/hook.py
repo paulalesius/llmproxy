@@ -31,7 +31,7 @@ Usage in config.yaml (both backends can share the same hook file):
 import subprocess
 import time
 import socket
-from blproxy.hooks import BackendHook, HookContext
+from exrouter.hooks import BackendHook, HookContext
 
 
 class BackendHook:
@@ -86,7 +86,23 @@ class BackendHook:
             print(f"  ✗ Error starting {service}: {e}")
     
     def _stop_service(self, service: str) -> None:
-        pass
+        """Stop a systemd service (idempotent if already stopped)."""
+        try:
+            print(f"  → Stopping {service}...")
+            result = subprocess.run(
+                ["systemctl", "stop", service],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                print(f"  ✓ {service} stopped")
+            else:
+                print(f"  ⚠ {service} stop error: {result.stderr.strip()}")
+        except subprocess.TimeoutExpired:
+            print(f"  ⚠ Timeout stopping {service}")
+        except Exception as e:
+            print(f"  ✗ Error stopping {service}: {e}")
 
     # Legacy per-request hooks kept for compatibility but left empty.
     # All service logic now lives in the activation lifecycle hooks above.

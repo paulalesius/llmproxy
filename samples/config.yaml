@@ -31,7 +31,7 @@ backends:
       - "/health"
       - "/v1/tokenize"
       - "/v1/detokenize"
-    script: "/src/blproxy/samples/hook.py"
+    script: "/src/exrouter/samples/hook.py"
     locks: [stt_custom]
 
   # stt_custom is a custom endpoint that takes a POST
@@ -43,7 +43,7 @@ backends:
     url: "http://127.0.0.1:8091"
     paths:
       - "/transcribe"
-    script: "/src/blproxy/samples/hook.py"
+    script: "/src/exrouter/samples/hook.py"
     locks: [llm]
 
   embed:
