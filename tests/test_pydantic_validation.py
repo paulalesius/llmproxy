@@ -2,7 +2,7 @@
 
 import pytest
 from pydantic import ValidationError
-from blproxy.config import Config
+from exrouter.config import Config
 
 
 def test_config_validates_correctly():

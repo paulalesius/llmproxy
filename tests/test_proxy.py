@@ -1,8 +1,8 @@
 """Test LockProxy routing and integration with mocked backends."""
 
 import pytest
-from src.blproxy.config import Config
-from src.blproxy.proxy import LockProxy
+from src.exrouter.config import Config
+from src.exrouter.proxy import LockProxy
 from fastapi.testclient import TestClient
 
 
@@ -102,7 +102,7 @@ def test_proxy_root_endpoint(proxy_config):
     
     response = client.get("/")
     assert response.status_code == 200
-    assert response.json()["name"] == "BLProxy"
+    assert response.json()["name"] == "EXRouter"
 
 
 def test_proxy_lock_timeout(proxy_config_with_locks):

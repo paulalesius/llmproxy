@@ -1,7 +1,7 @@
 """Test configuration loading."""
 
 import pytest
-from src.blproxy.config import Config, BackendConfig, ServerConfig, GlobalLockConfig
+from src.exrouter.config import Config, BackendConfig, ServerConfig, GlobalLockConfig
 
 def test_config_from_dict():
     """Test loading config from dict."""

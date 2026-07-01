@@ -17,14 +17,14 @@ Usage in config.yaml (both backends can share the same hook file):
         - /v1/chat/completions
         - /v1/models
         # ... etc
-      script: /src/blproxy/samples/hook.py
+      script: /src/exrouter/samples/hook.py
       locks: [stt_custom]   # optional but recommended for serialization
     
     stt_custom:
       url: http://127.0.0.1:8091
       paths:
         - /transcribe
-      script: /src/blproxy/samples/hook.py
+      script: /src/exrouter/samples/hook.py
       locks: [llm]
 """
 

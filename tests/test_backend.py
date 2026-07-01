@@ -1,7 +1,7 @@
 """Test Backend path matching."""
 
 import pytest
-from src.blproxy.backend import Backend
+from src.exrouter.backend import Backend
 
 
 def test_exact_path_match():

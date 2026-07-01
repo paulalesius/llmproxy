@@ -60,14 +60,11 @@ class RequestRemapper:
                 resp.raise_for_status()
                 openai_resp = resp.json()
 
-                # Convert to simple list format TEI clients expect
-                embeddings = [item["embedding"] for item in openai_resp.get("data", [])]
-
-                print(f"[REMAPPER] Returning {len(embeddings)} embedding vector(s)")
-
+                # Return OpenAI-compatible format (not TEI list format)
+                # Open WebUI expects {"data": [{"embedding": [...], "index": 0, "object": "embedding"}, ...]}
                 return RemapResult(
                     status_code=200,
-                    content=json.dumps(embeddings).encode(),
+                    content=json.dumps(openai_resp).encode(),
                     response_headers={"content-type": "application/json"}
                 )
 

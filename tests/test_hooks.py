@@ -3,9 +3,9 @@
 import pytest
 import tempfile
 from pathlib import Path
-from src.blproxy.config import Config
-from src.blproxy.proxy import LockProxy
-from src.blproxy.hooks import HookContext
+from src.exrouter.config import Config
+from src.exrouter.proxy import LockProxy
+from src.exrouter.hooks import HookContext
 from fastapi.testclient import TestClient
 
 
@@ -13,7 +13,7 @@ def create_test_hook_script(tmp_path: Path, hook_name: str) -> Path:
     """Create a test hook script that tracks call order."""
     
     script_content = f"""
-from blproxy.hooks import BackendHook, HookContext
+from exrouter.hooks import BackendHook, HookContext
 
 # Track which hooks were called
 CALLS = []
@@ -100,7 +100,7 @@ def test_hook_context_has_request_info(hook_config):
     
     # Create a new hook that captures context
     script_content = """
-from blproxy.hooks import BackendHook, HookContext
+from exrouter.hooks import BackendHook, HookContext
 
 CAPTURED_CONTEXT = None
 
@@ -166,7 +166,7 @@ def test_hook_error_context(hook_config):
     """Test that error is captured in HookContext when request fails."""
     
     script_content = """
-from blproxy.hooks import BackendHook, HookContext
+from exrouter.hooks import BackendHook, HookContext
 
 AFTER_REQUEST_CALLED = False
 ERROR_CONTEXT = None
@@ -216,7 +216,7 @@ def test_async_hooks(hook_config):
     
     script_content = """
 import asyncio
-from blproxy.hooks import BackendHook, HookContext
+from exrouter.hooks import BackendHook, HookContext
 
 CALLS = []
 

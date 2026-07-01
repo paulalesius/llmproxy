@@ -1,8 +1,8 @@
 """Test LockManager global locking."""
 
 import pytest
-from src.blproxy.backend import Backend
-from src.blproxy.proxy import LockManager
+from src.exrouter.backend import Backend
+from src.exrouter.proxy import LockManager
 
 
 @pytest.fixture
